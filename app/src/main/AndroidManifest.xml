@@ -12,9 +12,15 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.AdventurePad">
         <activity
+            android:name=".TrackpadActivity"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.AdventurePad" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:resizeableActivity="true"
             android:theme="@style/Theme.AdventurePad"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
