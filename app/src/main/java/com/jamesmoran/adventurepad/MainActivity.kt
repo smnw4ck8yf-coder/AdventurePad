@@ -1,7 +1,5 @@
 package com.jamesmoran.adventurepad
 
-import android.app.ActivityManager
-import android.app.ActivityOptions
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.Bundle
@@ -10,20 +8,29 @@ import android.view.Display
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -31,126 +38,236 @@ import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
-    private var launchStatus by mutableStateOf("Searching for a secondary display…")
+    private var lifecycleEvent by mutableStateOf("INITIALIZING")
+    private var lastLaunchResult by mutableStateOf("Waiting for initial trackpad launch.")
+    private var receivedIntentFlags by mutableStateOf(0)
+    private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        receivedIntentFlags = intent.flags
+        currentDisplayId = display?.displayId ?: Display.INVALID_DISPLAY
+        recordLifecycle("CREATED")
         enableEdgeToEdge()
 
         val displayManager = getSystemService(DisplayManager::class.java)
-        val mainDisplay = display ?: displayManager.getDisplay(Display.DEFAULT_DISPLAY)
 
         setContent {
             AdventurePadTheme {
-                DisplayInfoScreen(
-                    heading = "TOP DISPLAY",
-                    display = mainDisplay,
-                    backgroundColor = TopDisplayBackground,
-                    status = launchStatus,
-                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    DisplayInfoScreen(
+                        heading = "TOP DISPLAY",
+                        display = displayManager.getDisplay(currentDisplayId)
+                            ?: displayManager.getDisplay(Display.DEFAULT_DISPLAY),
+                        backgroundColor = TopDisplayBackground,
+                        diagnostics = runtimeDiagnostics(),
+                        onRestoreBothScreens = ::restoreBothScreens,
+                    )
+                    TopDisplayCursor()
+                }
             }
         }
 
-        launchTrackpadOnSecondaryDisplay(displayManager)
+        lastLaunchResult = DualDisplayCoordinator.launchTrackpad(
+            activity = this,
+            reason = "Initial MainActivity launch",
+        ).message
     }
 
-    private fun launchTrackpadOnSecondaryDisplay(displayManager: DisplayManager) {
-        val availableDisplays = displayManager.displays
-        availableDisplays.forEach { candidate ->
-            Log.i(
-                TAG,
-                "Display ${candidate.displayId}: name=${candidate.name}, " +
-                    "flags=${candidate.flags}, state=${candidate.state}",
-            )
-        }
+    override fun onStart() {
+        super.onStart()
+        recordLifecycle("STARTED")
+    }
 
-        val presentationDisplayIds = displayManager
-            .getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
-            .mapTo(mutableSetOf()) { it.displayId }
-        val secondaryDisplay = availableDisplays.firstOrNull { candidate ->
-            isEligibleSecondaryDisplay(candidate, presentationDisplayIds)
-        }
-        if (secondaryDisplay == null) {
-            launchStatus = "ERROR: No eligible physical presentation display was found."
-            Log.e(TAG, launchStatus)
-            return
-        }
+    override fun onResume() {
+        super.onResume()
+        recordLifecycle("RESUMED")
+    }
 
+    override fun onPause() {
+        recordLifecycle("PAUSED")
+        super.onPause()
+    }
+
+    override fun onStop() {
+        recordLifecycle("STOPPED")
+        super.onStop()
+    }
+
+    override fun onDestroy() {
+        recordLifecycle("DESTROYED")
+        super.onDestroy()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        receivedIntentFlags = intent.flags
+        lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
+            ?.let { "Received launch request: $it" }
+            ?: "Received a new intent without a launch reason."
+        recordLifecycle("NEW_INTENT")
+    }
+
+    private fun restoreBothScreens() {
+        lastLaunchResult = "Restore in progress…"
+        lastLaunchResult = DualDisplayCoordinator.restoreBoth(this).message
+    }
+
+    private fun runtimeDiagnostics() = ActivityRuntimeDiagnostics(
+        displayId = currentDisplayId,
+        taskId = taskId,
+        isTaskRoot = isTaskRoot,
+        lifecycleEvent = lifecycleEvent,
+        intentFlags = receivedIntentFlags,
+        lastResult = lastLaunchResult,
+    )
+
+    private fun recordLifecycle(event: String) {
+        currentDisplayId = display?.displayId ?: currentDisplayId
+        lifecycleEvent = event
         Log.i(
             TAG,
-            "Expected AYN Thor secondary display ID is 4; dynamically selected " +
-                "display ${secondaryDisplay.displayId} (${secondaryDisplay.name}).",
+            "MainActivity $event displayId=$currentDisplayId " +
+                "taskId=$taskId isTaskRoot=$isTaskRoot flags=${receivedIntentFlags.toHexFlags()}",
         )
-
-        val trackpadIntent = Intent(this, TrackpadActivity::class.java)
-        val activityManager = getSystemService(ActivityManager::class.java)
-        val launchAllowed = try {
-            activityManager.isActivityStartAllowedOnDisplay(
-                this,
-                secondaryDisplay.displayId,
-                trackpadIntent,
-            )
-        } catch (exception: RuntimeException) {
-            launchStatus = "ERROR: Could not check display launch permission: " +
-                (exception.message ?: exception.javaClass.simpleName)
-            Log.e(TAG, launchStatus, exception)
-            return
-        }
-
-        if (!launchAllowed) {
-            launchStatus = "ERROR: Android denied launching TrackpadActivity on display " +
-                "${secondaryDisplay.displayId}."
-            Log.e(TAG, launchStatus)
-            return
-        }
-
-        try {
-            val options = ActivityOptions.makeBasic()
-                .setLaunchDisplayId(secondaryDisplay.displayId)
-                .toBundle()
-            startActivity(trackpadIntent, options)
-            launchStatus = "LAUNCHED: TrackpadActivity on display ${secondaryDisplay.displayId}."
-            Log.i(TAG, launchStatus)
-        } catch (exception: RuntimeException) {
-            launchStatus = "ERROR: Failed to launch TrackpadActivity on display " +
-                "${secondaryDisplay.displayId}: " +
-                (exception.message ?: exception.javaClass.simpleName)
-            Log.e(TAG, launchStatus, exception)
-        }
-    }
-
-    private fun isEligibleSecondaryDisplay(
-        candidate: Display,
-        presentationDisplayIds: Set<Int>,
-    ): Boolean {
-        val mode = candidate.mode
-        val normalizedName = candidate.name.lowercase(Locale.ROOT)
-        val looksVirtual = VIRTUAL_DISPLAY_NAME_MARKERS.any(normalizedName::contains)
-
-        return candidate.displayId != Display.DEFAULT_DISPLAY &&
-            candidate.displayId in presentationDisplayIds &&
-            candidate.isValid &&
-            candidate.flags and Display.FLAG_PRESENTATION != 0 &&
-            candidate.flags and Display.FLAG_PRIVATE == 0 &&
-            candidate.state != Display.STATE_OFF &&
-            candidate.state != Display.STATE_UNKNOWN &&
-            !looksVirtual &&
-            mode.physicalWidth > 0 &&
-            mode.physicalHeight > 0
     }
 
     private companion object {
-        const val TAG = "AdventurePadDisplays"
+        const val TAG = "AdventurePadLifecycle"
+    }
+}
 
-        val VIRTUAL_DISPLAY_NAME_MARKERS = listOf(
-            "virtual",
-            "overlay",
-            "screen record",
-            "screenrecord",
-            "screen share",
-            "screenshare",
-            "mirroring",
+@Composable
+private fun TopDisplayCursor() {
+    var cursorState by remember { mutableStateOf(TopCursorState()) }
+    val cursorRadius = with(LocalDensity.current) { TopCursorRadius.toPx() }
+
+    DisposableEffect(cursorRadius) {
+        val subscription = CursorDeltaCoordinator.subscribe { delta ->
+            cursorState = cursorState.moveBy(delta.dx, delta.dy)
+        }
+        onDispose(subscription::cancel)
+    }
+
+    Canvas(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { size ->
+                cursorState = cursorState.withBounds(
+                    width = size.width.toFloat(),
+                    height = size.height.toFloat(),
+                    radius = cursorRadius,
+                )
+            },
+    ) {
+        val cursorCenter = if (cursorState.initialized) {
+            Offset(cursorState.x, cursorState.y)
+        } else {
+            center
+        }
+        drawCircle(
+            color = Color.Black,
+            radius = cursorRadius + TopCursorOutline.toPx(),
+            center = cursorCenter,
         )
+        drawCircle(
+            color = TopCursorColor,
+            radius = cursorRadius,
+            center = cursorCenter,
+        )
+    }
+}
+
+private data class TopCursorState(
+    val x: Float = 0f,
+    val y: Float = 0f,
+    val minimumX: Float = 0f,
+    val maximumX: Float = 0f,
+    val minimumY: Float = 0f,
+    val maximumY: Float = 0f,
+    val initialized: Boolean = false,
+) {
+    fun withBounds(width: Float, height: Float, radius: Float): TopCursorState {
+        val horizontalInset = radius.coerceIn(0f, width.coerceAtLeast(0f) / 2f)
+        val verticalInset = radius.coerceIn(0f, height.coerceAtLeast(0f) / 2f)
+        val newMinimumX = horizontalInset
+        val newMaximumX = (width - horizontalInset).coerceAtLeast(newMinimumX)
+        val newMinimumY = verticalInset
+        val newMaximumY = (height - verticalInset).coerceAtLeast(newMinimumY)
+        return if (initialized) {
+            copy(
+                x = x.coerceIn(newMinimumX, newMaximumX),
+                y = y.coerceIn(newMinimumY, newMaximumY),
+                minimumX = newMinimumX,
+                maximumX = newMaximumX,
+                minimumY = newMinimumY,
+                maximumY = newMaximumY,
+            )
+        } else {
+            copy(
+                x = width / 2f,
+                y = height / 2f,
+                minimumX = newMinimumX,
+                maximumX = newMaximumX,
+                minimumY = newMinimumY,
+                maximumY = newMaximumY,
+                initialized = width > 0f && height > 0f,
+            )
+        }
+    }
+
+    fun moveBy(dx: Float, dy: Float): TopCursorState = if (initialized) {
+        copy(
+            x = (x + dx).coerceIn(minimumX, maximumX),
+            y = (y + dy).coerceIn(minimumY, maximumY),
+        )
+    } else {
+        this
+    }
+}
+
+internal data class ActivityRuntimeDiagnostics(
+    val displayId: Int,
+    val taskId: Int,
+    val isTaskRoot: Boolean,
+    val lifecycleEvent: String,
+    val intentFlags: Int,
+    val lastResult: String,
+)
+
+@Composable
+internal fun ActivityDiagnosticsPanel(
+    diagnostics: ActivityRuntimeDiagnostics,
+    onRestoreBothScreens: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = "Display ${diagnostics.displayId}  •  Task ${diagnostics.taskId}  •  " +
+                "Root ${diagnostics.isTaskRoot}  •  ${diagnostics.lifecycleEvent}",
+            color = Color.White,
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        Text(
+            text = "Intent flags: ${diagnostics.intentFlags.toHexFlags()}",
+            color = Color.White,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Text(
+            text = "Last result: ${diagnostics.lastResult}",
+            color = Color(0xFFFFD166),
+            fontWeight = FontWeight.SemiBold,
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+        Button(
+            onClick = onRestoreBothScreens,
+            modifier = Modifier.padding(top = 12.dp),
+        ) {
+            Text("RESTORE BOTH SCREENS")
+        }
     }
 }
 
@@ -159,7 +276,8 @@ internal fun DisplayInfoScreen(
     heading: String,
     display: Display?,
     backgroundColor: Color,
-    status: String? = null,
+    diagnostics: ActivityRuntimeDiagnostics,
+    onRestoreBothScreens: () -> Unit,
 ) {
     val mode = display?.mode
 
@@ -201,19 +319,18 @@ internal fun DisplayInfoScreen(
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
-        status?.let {
-            Text(
-                text = it,
-                color = Color(0xFFFFD166),
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 28.dp),
-            )
-        }
+        ActivityDiagnosticsPanel(
+            diagnostics = diagnostics,
+            onRestoreBothScreens = onRestoreBothScreens,
+            modifier = Modifier.padding(top = 24.dp),
+        )
     }
 }
 
 private val TopDisplayBackground = Color(0xFF102A43)
+private val TopCursorColor = Color(0xFFFFD166)
+private val TopCursorRadius = 14.dp
+private val TopCursorOutline = 3.dp
 
 @Preview(showBackground = true)
 @Composable
@@ -223,7 +340,15 @@ private fun TopDisplayPreview() {
             heading = "TOP DISPLAY",
             display = null,
             backgroundColor = TopDisplayBackground,
-            status = "Preview: waiting for a secondary display.",
+            diagnostics = ActivityRuntimeDiagnostics(
+                displayId = 0,
+                taskId = 1,
+                isTaskRoot = true,
+                lifecycleEvent = "RESUMED",
+                intentFlags = 0,
+                lastResult = "Preview",
+            ),
+            onRestoreBothScreens = {},
         )
     }
 }

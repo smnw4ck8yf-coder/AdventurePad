@@ -11,15 +11,19 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AdventurePad">
+        <!-- A distinct affinity makes the trackpad an independently recoverable task. -->
         <activity
             android:name=".TrackpadActivity"
             android:exported="false"
+            android:launchMode="singleTask"
             android:resizeableActivity="true"
+            android:taskAffinity="${applicationId}.trackpad"
             android:theme="@style/Theme.AdventurePad" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
+            android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:theme="@style/Theme.AdventurePad"
             android:windowSoftInputMode="adjustResize">
