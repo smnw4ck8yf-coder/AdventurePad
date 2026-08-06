@@ -1,8 +1,9 @@
 package com.jamesmoran.adventurepad
 
 import android.content.Intent
-import android.hardware.display.DisplayManager
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -47,16 +48,21 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
-import java.util.Locale
 
 class TrackpadActivity : ComponentActivity() {
     private var lifecycleEvent by mutableStateOf("INITIALIZING")
     private var lastLaunchResult by mutableStateOf("Waiting for launch details.")
     private var receivedIntentFlags by mutableStateOf(0)
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
-    private var controllerLeftButtonDown = false
-    private var controllerRightButtonDown = false
+    private var mouseDiagnostics by mutableStateOf(MouseDiagnostics())
+    private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
+        mutableSetOf<MouseButtonSource>()
+    }
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val forwardedGamepadKeysDown = mutableSetOf<Int>()
+    private val tapLeftButtonRelease = Runnable {
+        releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -68,14 +74,13 @@ class TrackpadActivity : ComponentActivity() {
         recordLifecycle("CREATED")
         enableEdgeToEdge()
 
-        val displayManager = getSystemService(DisplayManager::class.java)
-        val trackpadDisplay = display?.let { displayManager.getDisplay(it.displayId) ?: it }
-
         setContent {
             AdventurePadTheme {
                 TrackpadTouchTestScreen(
-                    display = displayManager.getDisplay(currentDisplayId) ?: trackpadDisplay,
-                    diagnostics = runtimeDiagnostics(),
+                    mouseDiagnostics = mouseDiagnostics,
+                    onTapLeftClick = ::sendTapLeftClick,
+                    onButtonDown = ::pressDedicatedButton,
+                    onButtonUp = ::releaseDedicatedButton,
                     onRestoreBothScreens = ::restoreBothScreens,
                 )
             }
@@ -94,13 +99,13 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        releaseAllMouseButtons("PAUSE")
         recordLifecycle("PAUSED")
         super.onPause()
     }
 
     override fun onStop() {
         recordLifecycle("STOPPED")
-        releaseControllerButtons()
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
         ScummVMInputClient.unbind()
@@ -117,13 +122,20 @@ class TrackpadActivity : ComponentActivity() {
         return super.dispatchGenericMotionEvent(event)
     }
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (forwardControllerKeyEvent(event)) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (forwardControllerKeyEvent(event)) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
+    private fun forwardControllerKeyEvent(event: KeyEvent): Boolean {
         val mouseButton = when {
             event.keyCode == KeyEvent.KEYCODE_BUTTON_A -> ScummVMMouseButton.LEFT
             event.keyCode == KeyEvent.KEYCODE_BUTTON_B -> ScummVMMouseButton.RIGHT
-            event.keyCode == KeyEvent.KEYCODE_BACK && event.isFromGameController() -> {
-                ScummVMMouseButton.RIGHT
-            }
             else -> null
         }
 
@@ -133,12 +145,18 @@ class TrackpadActivity : ComponentActivity() {
         if (event.isFromGameController() && forwardGamepadKey(event)) {
             return true
         }
-        return super.dispatchKeyEvent(event)
+        return false
     }
 
     override fun onDestroy() {
+        releaseAllMouseButtons("DESTROY")
         recordLifecycle("DESTROYED")
         super.onDestroy()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) releaseAllMouseButtons("FOCUS LOSS")
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -152,59 +170,27 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun restoreBothScreens() {
+        releaseAllMouseButtons("RESTORE")
         lastLaunchResult = "Restore in progress…"
         lastLaunchResult = DualDisplayCoordinator.restoreBoth(this).message
-    }
-
-    private fun markControllerButtonDown(button: ScummVMMouseButton): Boolean = when (button) {
-        ScummVMMouseButton.LEFT -> (!controllerLeftButtonDown).also {
-            controllerLeftButtonDown = true
-        }
-        ScummVMMouseButton.RIGHT -> (!controllerRightButtonDown).also {
-            controllerRightButtonDown = true
-        }
-    }
-
-    private fun markControllerButtonUp(button: ScummVMMouseButton): Boolean = when (button) {
-        ScummVMMouseButton.LEFT -> controllerLeftButtonDown.also {
-            controllerLeftButtonDown = false
-        }
-        ScummVMMouseButton.RIGHT -> controllerRightButtonDown.also {
-            controllerRightButtonDown = false
-        }
-    }
-
-    private fun releaseControllerButtons() {
-        if (markControllerButtonUp(ScummVMMouseButton.LEFT)) {
-            ScummVMInputClient.sendButtonEvent(ScummVMButtonEvent.LEFT_BUTTON_UP)
-        }
-        if (markControllerButtonUp(ScummVMMouseButton.RIGHT)) {
-            ScummVMInputClient.sendButtonEvent(ScummVMButtonEvent.RIGHT_BUTTON_UP)
-        }
     }
 
     private fun forwardMouseButton(event: KeyEvent, button: ScummVMMouseButton): Boolean {
         return when (event.action) {
             KeyEvent.ACTION_DOWN -> {
-                if (isControllerButtonDown(button)) {
+                if (isMouseButtonSourceDown(button, MouseButtonSource.CONTROLLER)) {
                     true
-                } else if (event.repeatCount == 0 &&
-                    ScummVMInputClient.sendButtonEvent(button.downEvent)
-                ) {
-                    markControllerButtonDown(button)
-                    Log.i(AdventurePadBridgeTag, "Button consumed: ${button.name} DOWN")
-                    true
+                } else if (event.repeatCount == 0) {
+                    pressMouseButton(button, MouseButtonSource.CONTROLLER)
                 } else {
                     false
                 }
             }
             KeyEvent.ACTION_UP -> {
-                if (!isControllerButtonDown(button)) {
+                if (!isMouseButtonSourceDown(button, MouseButtonSource.CONTROLLER)) {
                     false
                 } else {
-                    markControllerButtonUp(button)
-                    ScummVMInputClient.sendButtonEvent(button.upEvent)
-                    Log.i(AdventurePadBridgeTag, "Button consumed: ${button.name} UP")
+                    releaseMouseButton(button, MouseButtonSource.CONTROLLER)
                     true
                 }
             }
@@ -247,9 +233,87 @@ class TrackpadActivity : ComponentActivity() {
         forwardedGamepadKeysDown.clear()
     }
 
-    private fun isControllerButtonDown(button: ScummVMMouseButton): Boolean = when (button) {
-        ScummVMMouseButton.LEFT -> controllerLeftButtonDown
-        ScummVMMouseButton.RIGHT -> controllerRightButtonDown
+    private fun pressDedicatedButton(button: ScummVMMouseButton) {
+        pressMouseButton(button, MouseButtonSource.DEDICATED_BUTTON)
+    }
+
+    private fun releaseDedicatedButton(button: ScummVMMouseButton) {
+        releaseMouseButton(button, MouseButtonSource.DEDICATED_BUTTON)
+    }
+
+    private fun sendTapLeftClick() {
+        val activeLeftSources = mouseButtonSources.getValue(ScummVMMouseButton.LEFT)
+        if (activeLeftSources.any { it != MouseButtonSource.TRACKPAD_TAP }) return
+
+        mainHandler.removeCallbacks(tapLeftButtonRelease)
+        releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
+        if (pressMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)) {
+            mainHandler.postDelayed(tapLeftButtonRelease, TapClickDurationMillis)
+        }
+    }
+
+    private fun pressMouseButton(
+        button: ScummVMMouseButton,
+        source: MouseButtonSource,
+    ): Boolean {
+        val sources = mouseButtonSources.getValue(button)
+        if (!sources.add(source)) return true
+        if (sources.size > 1) return true
+
+        if (!ScummVMInputClient.sendButtonEvent(button.downEvent)) {
+            sources.remove(source)
+            return false
+        }
+        updateMouseDiagnostics(button, isDown = true)
+        return true
+    }
+
+    private fun releaseMouseButton(
+        button: ScummVMMouseButton,
+        source: MouseButtonSource,
+    ): Boolean {
+        val sources = mouseButtonSources.getValue(button)
+        if (!sources.remove(source)) return false
+        if (sources.isNotEmpty()) return true
+
+        ScummVMInputClient.sendButtonEvent(button.upEvent)
+        updateMouseDiagnostics(button, isDown = false)
+        return true
+    }
+
+    private fun releaseAllMouseButtons(reason: String) {
+        mainHandler.removeCallbacks(tapLeftButtonRelease)
+        ScummVMMouseButton.entries.forEach { button ->
+            val sources = mouseButtonSources.getValue(button)
+            if (sources.isNotEmpty()) {
+                sources.clear()
+                ScummVMInputClient.sendButtonEvent(button.upEvent)
+                updateMouseDiagnostics(button, isDown = false, reason = reason)
+            }
+        }
+    }
+
+    private fun isMouseButtonSourceDown(
+        button: ScummVMMouseButton,
+        source: MouseButtonSource,
+    ): Boolean = source in mouseButtonSources.getValue(button)
+
+    private fun updateMouseDiagnostics(
+        button: ScummVMMouseButton,
+        isDown: Boolean,
+        reason: String? = null,
+    ) {
+        val state = if (isDown) "DOWN" else "UP"
+        mouseDiagnostics = when (button) {
+            ScummVMMouseButton.LEFT -> mouseDiagnostics.copy(
+                leftButtonDown = isDown,
+                lastButtonAction = "LEFT $state" + reason?.let { " ($it)" }.orEmpty(),
+            )
+            ScummVMMouseButton.RIGHT -> mouseDiagnostics.copy(
+                rightButtonDown = isDown,
+                lastButtonAction = "RIGHT $state" + reason?.let { " ($it)" }.orEmpty(),
+            )
+        }
     }
 
     private fun runtimeDiagnostics() = ActivityRuntimeDiagnostics(
@@ -278,8 +342,10 @@ class TrackpadActivity : ComponentActivity() {
 
 @Composable
 private fun TrackpadTouchTestScreen(
-    display: Display?,
-    diagnostics: ActivityRuntimeDiagnostics,
+    mouseDiagnostics: MouseDiagnostics,
+    onTapLeftClick: () -> Unit,
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
     onRestoreBothScreens: () -> Unit,
 ) {
     val touchState = remember { mutableStateOf(TouchState()) }
@@ -291,52 +357,44 @@ private fun TrackpadTouchTestScreen(
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         CompactActivityHeader(
-            display = display,
-            diagnostics = diagnostics,
             onRestoreBothScreens = onRestoreBothScreens,
         )
 
         TouchSurface(
             touchState = touchState,
+            onTapLeftClick = onTapLeftClick,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .padding(vertical = 8.dp),
         )
 
-        TouchDiagnostics(touchState.value)
+        MouseButtonControls(
+            diagnostics = mouseDiagnostics,
+            onButtonDown = onButtonDown,
+            onButtonUp = onButtonUp,
+        )
+        MouseDiagnosticsPanel(mouseDiagnostics)
     }
 }
 
 @Composable
 private fun CompactActivityHeader(
-    display: Display?,
-    diagnostics: ActivityRuntimeDiagnostics,
     onRestoreBothScreens: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "TRACKPAD RELATIVE MOVEMENT TEST",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                style = MaterialTheme.typography.headlineSmall,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = "Display ID ${display?.displayId ?: diagnostics.displayId}  •  " +
-                    "Task ID ${diagnostics.taskId}  •  Root ${diagnostics.isTaskRoot}  •  " +
-                    "${diagnostics.lifecycleEvent}  •  Flags ${diagnostics.intentFlags.toHexFlags()}",
-                color = Color.White,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        Text(
+            text = "TRACKPAD RELATIVE MOVEMENT TEST",
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.headlineSmall,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
         Button(
             onClick = onRestoreBothScreens,
             modifier = Modifier.padding(start = 12.dp),
@@ -347,20 +405,12 @@ private fun CompactActivityHeader(
             )
         }
     }
-    Text(
-        text = "Last result: ${diagnostics.lastResult}",
-        color = Color(0xFFFFD166),
-        fontWeight = FontWeight.SemiBold,
-        style = MaterialTheme.typography.bodySmall,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.fillMaxWidth(),
-    )
 }
 
 @Composable
 private fun TouchSurface(
     touchState: MutableState<TouchState>,
+    onTapLeftClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
@@ -385,7 +435,7 @@ private fun TouchSurface(
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
                         if (tapTracker.handle(event)) {
-                            ScummVMInputClient.sendTapLeftClick()
+                            onTapLeftClick()
                         }
                     }
                 }
@@ -775,29 +825,91 @@ private fun Offset.constrainTo(surfaceWidth: Float, surfaceHeight: Float) = Offs
 )
 
 @Composable
-private fun TouchDiagnostics(touchState: TouchState) {
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        DiagnosticRow(
-            "Finger X: ${touchState.fingerX.asCoordinate()}",
-            "Finger Y: ${touchState.fingerY.asCoordinate()}",
-            "Delta X: ${touchState.deltaX.asCoordinate()}",
-            "Delta Y: ${touchState.deltaY.asCoordinate()}",
-            "Action: ${touchState.action.label}",
+private fun MouseButtonControls(
+    diagnostics: MouseDiagnostics,
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        MouseButtonControl(
+            label = "LEFT",
+            button = ScummVMMouseButton.LEFT,
+            isDown = diagnostics.leftButtonDown,
+            onButtonDown = onButtonDown,
+            onButtonUp = onButtonUp,
+            modifier = Modifier.weight(1f),
         )
-        DiagnosticRow(
-            "Cursor X: ${touchState.cursorX.asCoordinate()}",
-            "Cursor Y: ${touchState.cursorY.asCoordinate()}",
-            "Pointers: ${touchState.pointerCount}",
-            "Tracked ID: ${touchState.trackedPointerId?.value ?: "none"}",
-            "Moves: ${touchState.moveEventCount}",
+        MouseButtonControl(
+            label = "RIGHT",
+            button = ScummVMMouseButton.RIGHT,
+            isDown = diagnostics.rightButtonDown,
+            onButtonDown = onButtonDown,
+            onButtonUp = onButtonUp,
+            modifier = Modifier.weight(1f),
         )
     }
 }
 
 @Composable
-private fun DiagnosticRow(vararg values: String) {
+private fun MouseButtonControl(
+    label: String,
+    button: ScummVMMouseButton,
+    isDown: Boolean,
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .background(if (isDown) MarkerColor else TouchSurfaceBackground)
+            .border(2.dp, TouchSurfaceBorder)
+            .pointerInput(button) {
+                var pointerDown = false
+                try {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            val pressed = event.changes.any { it.pressed }
+                            if (pressed && !pointerDown) {
+                                pointerDown = true
+                                onButtonDown(button)
+                            } else if (!pressed && pointerDown) {
+                                pointerDown = false
+                                onButtonUp(button)
+                            }
+                            event.changes.forEach(PointerInputChange::consume)
+                        }
+                    }
+                } finally {
+                    if (pointerDown) onButtonUp(button)
+                }
+            }
+            .padding(vertical = 16.dp),
+    ) {
+        Text(
+            text = label,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
+    }
+}
+
+@Composable
+private fun MouseDiagnosticsPanel(diagnostics: MouseDiagnostics) {
     Row(modifier = Modifier.fillMaxWidth()) {
-        values.forEach { value ->
+        listOf(
+            "Left button: ${if (diagnostics.leftButtonDown) "DOWN" else "UP"}",
+            "Right button: ${if (diagnostics.rightButtonDown) "DOWN" else "UP"}",
+            "Drag: ${if (diagnostics.leftButtonDown) "ACTIVE" else "INACTIVE"}",
+            "Last button action: ${diagnostics.lastButtonAction}",
+        ).forEach { value ->
             Text(
                 text = value,
                 color = Color.White,
@@ -813,7 +925,19 @@ private fun DiagnosticRow(vararg values: String) {
     }
 }
 
-private fun Float.asCoordinate(): String = String.format(Locale.US, "%.1f", this)
+private data class MouseDiagnostics(
+    val leftButtonDown: Boolean = false,
+    val rightButtonDown: Boolean = false,
+    val lastButtonAction: String = "NONE",
+)
+
+private enum class MouseButtonSource {
+    DEDICATED_BUTTON,
+    CONTROLLER,
+    TRACKPAD_TAP,
+}
+
+private const val TapClickDurationMillis = 50L
 
 private data class TouchState(
     val fingerX: Float = 0f,

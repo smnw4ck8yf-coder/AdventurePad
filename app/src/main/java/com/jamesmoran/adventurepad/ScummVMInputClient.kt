@@ -5,8 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
-import android.os.Handler
-import android.os.Looper
 import android.os.Message
 import android.os.Messenger
 import android.os.RemoteException
@@ -25,7 +23,6 @@ internal object ScummVMInputClient {
     private const val MSG_RELATIVE_MOVE = 1
     private const val MSG_JOYSTICK_AXIS = 6
     private const val MSG_GAMEPAD_KEY = 7
-    private const val TAP_CLICK_DURATION_MILLIS = 50L
     private const val JOYSTICK_AXIS_MAX = 32767
     private const val ANDROID_JOYSTICK_DEAD_ZONE = 0.209f
     private const val JOYSTICK_HAT_SCALE = 0.66f
@@ -34,18 +31,9 @@ internal object ScummVMInputClient {
     private var applicationContext: Context? = null
     private var bindingRequested = false
     private var remoteMessenger: Messenger? = null
-    private val mainHandler = Handler(Looper.getMainLooper())
-    private var tapLeftButtonDown = false
     private val lastJoystickPositions = mutableMapOf<JoystickAxisKey, Int>()
     private val loggedGamepadDevices = mutableSetOf<Int>()
     private val loggedJoystickAxes = mutableSetOf<JoystickAxisKey>()
-    private val tapLeftButtonRelease = Runnable {
-        if (tapLeftButtonDown) {
-            sendButtonEvent(ScummVMButtonEvent.LEFT_BUTTON_UP)
-            tapLeftButtonDown = false
-        }
-    }
-
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             remoteMessenger = Messenger(service)
@@ -96,8 +84,6 @@ internal object ScummVMInputClient {
 
     @Synchronized
     fun unbind() {
-        mainHandler.removeCallbacks(tapLeftButtonRelease)
-        tapLeftButtonRelease.run()
         val context = applicationContext
         if (bindingRequested && context != null) {
             try {
@@ -129,18 +115,6 @@ internal object ScummVMInputClient {
         } catch (exception: RemoteException) {
             remoteMessenger = null
             Log.w(TAG, "Messenger send failed; waiting for a future lifecycle rebind", exception)
-        }
-    }
-
-    fun sendTapLeftClick() {
-        Log.i(BRIDGE_TAG, "Tap recognised")
-        if (tapLeftButtonDown) {
-            mainHandler.removeCallbacks(tapLeftButtonRelease)
-            tapLeftButtonRelease.run()
-        }
-        if (sendButtonEvent(ScummVMButtonEvent.LEFT_BUTTON_DOWN)) {
-            tapLeftButtonDown = true
-            mainHandler.postDelayed(tapLeftButtonRelease, TAP_CLICK_DURATION_MILLIS)
         }
     }
 
