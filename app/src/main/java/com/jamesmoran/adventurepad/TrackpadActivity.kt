@@ -11,6 +11,7 @@ import android.view.ViewConfiguration
 import android.util.Log
 import android.view.Display
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
@@ -35,9 +36,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +59,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
@@ -78,6 +83,7 @@ class TrackpadActivity : ComponentActivity() {
     private val forwardedGamepadKeysDown = mutableSetOf<Int>()
     private val rawTouchDiagnostics = RawTouchDiagnostics()
     private val touchProvenance = TrackpadTouchProvenance()
+    private lateinit var pointerSpeedRepository: PointerSpeedRepository
     private val tapLeftButtonRelease = Runnable {
         releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
     }
@@ -92,9 +98,11 @@ class TrackpadActivity : ComponentActivity() {
         recordLifecycle("CREATED")
         touchProvenance.reset(gestureResetGeneration)
         rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
+        pointerSpeedRepository = PointerSpeedRepository.create(this, lifecycleScope)
         enableEdgeToEdge()
 
         setContent {
+            val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
             AdventurePadTheme {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
@@ -102,6 +110,12 @@ class TrackpadActivity : ComponentActivity() {
                     connectionDiagnostics = connectionDiagnostics,
                     gestureResetGeneration = gestureResetGeneration,
                     touchProvenance = touchProvenance,
+                    pointerSpeed = pointerSpeed,
+                    onPointerSpeedSelected = { selectedSpeed ->
+                        lifecycleScope.launch {
+                            pointerSpeedRepository.setPointerSpeed(selectedSpeed)
+                        }
+                    },
                     onGesture = ::handleTrackpadGesture,
                     onGestureDiagnostic = ::recordGestureDiagnostic,
                     onButtonDown = ::pressDedicatedButton,
@@ -501,6 +515,8 @@ private fun AdventurePadScreen(
     connectionDiagnostics: ScummVMConnectionDiagnostics,
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
+    pointerSpeed: PointerSpeed,
+    onPointerSpeedSelected: (PointerSpeed) -> Unit,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
@@ -509,6 +525,11 @@ private fun AdventurePadScreen(
 ) {
     val touchState = remember { mutableStateOf(TouchState()) }
     var diagnosticsVisible by remember { mutableStateOf(false) }
+    var settingsVisible by rememberSaveable { mutableStateOf(false) }
+
+    BackHandler(enabled = settingsVisible) {
+        settingsVisible = false
+    }
 
     Column(
         modifier = Modifier
@@ -517,38 +538,128 @@ private fun AdventurePadScreen(
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
-        CompactActivityHeader(
-            isScummVMConnected = connectionDiagnostics.isConnected,
-            diagnosticsVisible = diagnosticsVisible,
-            onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
-            onRestoreBothScreens = onRestoreBothScreens,
-        )
+        if (settingsVisible) {
+            PointerSpeedSettings(
+                pointerSpeed = pointerSpeed,
+                onPointerSpeedSelected = onPointerSpeedSelected,
+                onClose = { settingsVisible = false },
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            CompactActivityHeader(
+                isScummVMConnected = connectionDiagnostics.isConnected,
+                diagnosticsVisible = diagnosticsVisible,
+                onOpenSettings = {
+                    diagnosticsVisible = false
+                    settingsVisible = true
+                },
+                onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
+                onRestoreBothScreens = onRestoreBothScreens,
+            )
 
-        TouchSurface(
-            touchState = touchState,
-            gestureResetGeneration = gestureResetGeneration,
-            touchProvenance = touchProvenance,
-            onGesture = onGesture,
-            onGestureDiagnostic = onGestureDiagnostic,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .padding(vertical = 6.dp),
-        )
+            TouchSurface(
+                touchState = touchState,
+                gestureResetGeneration = gestureResetGeneration,
+                touchProvenance = touchProvenance,
+                pointerSpeed = pointerSpeed,
+                onGesture = onGesture,
+                onGestureDiagnostic = onGestureDiagnostic,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(vertical = 6.dp),
+            )
 
-        if (diagnosticsVisible) {
-            MouseDiagnosticsPanel(
+            if (diagnosticsVisible) {
+                MouseDiagnosticsPanel(
+                    diagnostics = mouseDiagnostics,
+                    displayId = displayId,
+                    connectionDiagnostics = connectionDiagnostics,
+                )
+            }
+
+            MouseButtonControls(
                 diagnostics = mouseDiagnostics,
-                displayId = displayId,
-                connectionDiagnostics = connectionDiagnostics,
+                onButtonDown = onButtonDown,
+                onButtonUp = onButtonUp,
             )
         }
+    }
+}
 
-        MouseButtonControls(
-            diagnostics = mouseDiagnostics,
-            onButtonDown = onButtonDown,
-            onButtonUp = onButtonUp,
+@Composable
+private fun PointerSpeedSettings(
+    pointerSpeed: PointerSpeed,
+    onPointerSpeedSelected: (PointerSpeed) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .background(TouchSurfaceBackground)
+            .border(2.dp, TouchSurfaceBorder)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Pointer speed",
+                color = PrimaryText,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleLarge,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                onClick = onClose,
+                colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
+            ) {
+                Text("CLOSE")
+            }
+        }
+        Text(
+            text = "Current: ${pointerSpeed.label}",
+            color = PrimaryText,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.titleMedium,
         )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            PointerSpeed.entries.forEach { option ->
+                OutlinedButton(
+                    onClick = { onPointerSpeedSelected(option) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (option == pointerSpeed) {
+                            ButtonPressedBackground
+                        } else {
+                            Color.Transparent
+                        },
+                        contentColor = PrimaryText,
+                    ),
+                    border = BorderStroke(
+                        width = if (option == pointerSpeed) 2.dp else 1.dp,
+                        color = if (option == pointerSpeed) PrimaryText else TouchSurfaceBorder,
+                    ),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(
+                        text = option.label,
+                        fontWeight = if (option == pointerSpeed) {
+                            FontWeight.Bold
+                        } else {
+                            FontWeight.Normal
+                        },
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
     }
 }
 
@@ -556,6 +667,7 @@ private fun AdventurePadScreen(
 private fun CompactActivityHeader(
     isScummVMConnected: Boolean,
     diagnosticsVisible: Boolean,
+    onOpenSettings: () -> Unit,
     onToggleDiagnostics: () -> Unit,
     onRestoreBothScreens: () -> Unit,
 ) {
@@ -573,6 +685,13 @@ private fun CompactActivityHeader(
             modifier = Modifier.weight(1f),
         )
         ConnectionIndicator(isConnected = isScummVMConnected)
+        TextButton(
+            onClick = onOpenSettings,
+            colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
+            modifier = Modifier.padding(start = 4.dp),
+        ) {
+            Text(text = "SETTINGS", maxLines = 1)
+        }
         TextButton(
             onClick = onToggleDiagnostics,
             colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
@@ -621,11 +740,13 @@ private fun TouchSurface(
     touchState: MutableState<TouchState>,
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
+    pointerSpeed: PointerSpeed,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
+    val currentPointerSpeed by rememberUpdatedState(pointerSpeed)
     val viewConfiguration = LocalViewConfiguration.current
     val androidViewConfiguration = ViewConfiguration.get(LocalContext.current)
 
@@ -767,6 +888,7 @@ private fun TouchSurface(
                                     allowMovement = gestureUpdate.allowMovement,
                                     updateMovementBaseline = gestureUpdate.updateMovementBaseline,
                                     resetMovementBaseline = gestureUpdate.resetMovementBaseline,
+                                    pointerSpeed = currentPointerSpeed,
                                 )
                                 touchState.value = nextState
                                 event.changes.forEach(PointerInputChange::consume)
@@ -1692,6 +1814,7 @@ private fun handlePointerEvent(
     allowMovement: Boolean,
     updateMovementBaseline: Boolean,
     resetMovementBaseline: Boolean,
+    pointerSpeed: PointerSpeed,
 ): TouchState {
     val state = previousState.withSurfaceSize(surfaceWidth, surfaceHeight)
     val activePointerCount = event.changes.count { it.pressed }
@@ -1791,10 +1914,12 @@ private fun handlePointerEvent(
                     moveEventCount = (state.moveEventCount + 1)
                         .coerceAtMost(MaxMoveEventCount),
                 )
-                CursorDeltaCoordinator.publish(
-                    dx = updatedState.deltaX,
-                    dy = updatedState.deltaY,
+                val scaledDelta = scaleRelativeDelta(
+                    rawDx = updatedState.deltaX,
+                    rawDy = updatedState.deltaY,
+                    pointerSpeed = pointerSpeed,
                 )
+                CursorDeltaCoordinator.publish(dx = scaledDelta.dx, dy = scaledDelta.dy)
                 updatedState
             }
         }
