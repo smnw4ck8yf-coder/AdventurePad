@@ -31,29 +31,34 @@ internal object ScummVMInputClient {
     private var applicationContext: Context? = null
     private var bindingRequested = false
     private var remoteMessenger: Messenger? = null
+    private var connectionStateListener: ((Boolean) -> Unit)? = null
     private val lastJoystickPositions = mutableMapOf<JoystickAxisKey, Int>()
     private val loggedGamepadDevices = mutableSetOf<Int>()
     private val loggedJoystickAxes = mutableSetOf<JoystickAxisKey>()
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
             remoteMessenger = Messenger(service)
+            notifyConnectionState()
             Log.i(TAG, "Messenger connected to $name")
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
             remoteMessenger = null
+            notifyConnectionState()
             clearGamepadState()
             Log.w(TAG, "Messenger disconnected from $name")
         }
 
         override fun onBindingDied(name: ComponentName) {
             remoteMessenger = null
+            notifyConnectionState()
             clearGamepadState()
             Log.e(TAG, "Messenger binding died for $name")
         }
 
         override fun onNullBinding(name: ComponentName) {
             remoteMessenger = null
+            notifyConnectionState()
             clearGamepadState()
             Log.e(TAG, "ScummVM returned a null Messenger binding for $name")
         }
@@ -82,6 +87,11 @@ internal object ScummVMInputClient {
         }
     }
 
+    fun setConnectionStateListener(listener: ((Boolean) -> Unit)?) {
+        connectionStateListener = listener
+        listener?.invoke(remoteMessenger != null)
+    }
+
     @Synchronized
     fun unbind() {
         val context = applicationContext
@@ -94,6 +104,7 @@ internal object ScummVMInputClient {
             }
         }
         remoteMessenger = null
+        notifyConnectionState()
         clearGamepadState()
         bindingRequested = false
         applicationContext = null
@@ -114,6 +125,7 @@ internal object ScummVMInputClient {
             messenger.send(message)
         } catch (exception: RemoteException) {
             remoteMessenger = null
+            notifyConnectionState()
             Log.w(TAG, "Messenger send failed; waiting for a future lifecycle rebind", exception)
         }
     }
@@ -127,6 +139,7 @@ internal object ScummVMInputClient {
             true
         } catch (exception: RemoteException) {
             remoteMessenger = null
+            notifyConnectionState()
             Log.w(TAG, "Button event forwarding failed", exception)
             false
         }
@@ -169,6 +182,7 @@ internal object ScummVMInputClient {
                 }
             } catch (exception: RemoteException) {
                 remoteMessenger = null
+                notifyConnectionState()
                 clearGamepadState()
                 Log.w(TAG, "Joystick forwarding failed", exception)
                 return false
@@ -189,6 +203,7 @@ internal object ScummVMInputClient {
                     messenger.send(message)
                 } catch (exception: RemoteException) {
                     remoteMessenger = null
+                    notifyConnectionState()
                     Log.w(TAG, "Joystick release forwarding failed", exception)
                     return@forEach
                 }
@@ -216,6 +231,7 @@ internal object ScummVMInputClient {
             true
         } catch (exception: RemoteException) {
             remoteMessenger = null
+            notifyConnectionState()
             clearGamepadState()
             Log.w(TAG, "Gamepad key forwarding failed", exception)
             false
@@ -223,6 +239,10 @@ internal object ScummVMInputClient {
     }
 
     fun isForwardedGamepadKey(keyCode: Int): Boolean = keyCode in ForwardedGamepadKeyCodes
+
+    private fun notifyConnectionState() {
+        connectionStateListener?.invoke(remoteMessenger != null)
+    }
 
     private fun joystickMappingsFor(device: InputDevice): List<JoystickAxisMapping> {
         val mappings = listOfNotNull(

@@ -14,18 +14,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -60,6 +67,7 @@ class TrackpadActivity : ComponentActivity() {
     private var receivedIntentFlags by mutableStateOf(0)
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
     private var mouseDiagnostics by mutableStateOf(MouseDiagnostics())
+    private var isScummVMConnected by mutableStateOf(false)
     private var gestureResetGeneration by mutableStateOf(0)
     private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
         mutableSetOf<MouseButtonSource>()
@@ -82,8 +90,10 @@ class TrackpadActivity : ComponentActivity() {
 
         setContent {
             AdventurePadTheme {
-                TrackpadTouchTestScreen(
+                AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
+                    displayId = currentDisplayId,
+                    isScummVMConnected = isScummVMConnected,
                     gestureResetGeneration = gestureResetGeneration,
                     onGesture = ::handleTrackpadGesture,
                     onGestureDiagnostic = ::recordGestureDiagnostic,
@@ -97,6 +107,9 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        ScummVMInputClient.setConnectionStateListener { isConnected ->
+            isScummVMConnected = isConnected
+        }
         ScummVMInputClient.bind(this)
         recordLifecycle("STARTED")
     }
@@ -118,6 +131,7 @@ class TrackpadActivity : ComponentActivity() {
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
         ScummVMInputClient.unbind()
+        ScummVMInputClient.setConnectionStateListener(null)
         super.onStop()
     }
 
@@ -411,8 +425,10 @@ class TrackpadActivity : ComponentActivity() {
 }
 
 @Composable
-private fun TrackpadTouchTestScreen(
+private fun AdventurePadScreen(
     mouseDiagnostics: MouseDiagnostics,
+    displayId: Int,
+    isScummVMConnected: Boolean,
     gestureResetGeneration: Int,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
@@ -421,14 +437,19 @@ private fun TrackpadTouchTestScreen(
     onRestoreBothScreens: () -> Unit,
 ) {
     val touchState = remember { mutableStateOf(TouchState()) }
+    var diagnosticsVisible by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(TrackpadBackground)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         CompactActivityHeader(
+            isScummVMConnected = isScummVMConnected,
+            diagnosticsVisible = diagnosticsVisible,
+            onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
             onRestoreBothScreens = onRestoreBothScreens,
         )
 
@@ -440,20 +461,30 @@ private fun TrackpadTouchTestScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(vertical = 8.dp),
+                .padding(vertical = 6.dp),
         )
+
+        if (diagnosticsVisible) {
+            MouseDiagnosticsPanel(
+                diagnostics = mouseDiagnostics,
+                displayId = displayId,
+                isScummVMConnected = isScummVMConnected,
+            )
+        }
 
         MouseButtonControls(
             diagnostics = mouseDiagnostics,
             onButtonDown = onButtonDown,
             onButtonUp = onButtonUp,
         )
-        MouseDiagnosticsPanel(mouseDiagnostics)
     }
 }
 
 @Composable
 private fun CompactActivityHeader(
+    isScummVMConnected: Boolean,
+    diagnosticsVisible: Boolean,
+    onToggleDiagnostics: () -> Unit,
     onRestoreBothScreens: () -> Unit,
 ) {
     Row(
@@ -461,23 +492,55 @@ private fun CompactActivityHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            text = "TRACKPAD RELATIVE MOVEMENT TEST",
-            color = Color.White,
+            text = "AdventurePad",
+            color = PrimaryText,
             fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.headlineSmall,
+            style = MaterialTheme.typography.titleLarge,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Button(
+        ConnectionIndicator(isConnected = isScummVMConnected)
+        TextButton(
+            onClick = onToggleDiagnostics,
+            colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
+            modifier = Modifier.padding(start = 4.dp),
+        ) {
+            Text(
+                text = if (diagnosticsVisible) "HIDE DIAGNOSTICS" else "DIAGNOSTICS",
+                maxLines = 1,
+            )
+        }
+        OutlinedButton(
             onClick = onRestoreBothScreens,
-            modifier = Modifier.padding(start = 12.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = SecondaryText),
+            border = BorderStroke(1.dp, TouchSurfaceBorder),
+            modifier = Modifier.padding(start = 4.dp),
         ) {
             Text(
                 text = "RESTORE BOTH SCREENS",
                 maxLines = 1,
             )
         }
+    }
+}
+
+@Composable
+private fun ConnectionIndicator(isConnected: Boolean) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = Modifier
+            .background(StatusBackground)
+            .border(1.dp, TouchSurfaceBorder)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(
+            text = if (isConnected) "CONNECTED" else "DISCONNECTED",
+            color = if (isConnected) PrimaryText else SecondaryText,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
+            maxLines = 1,
+        )
     }
 }
 
@@ -582,14 +645,6 @@ private fun TouchSurface(
             )
             drawCircle(MarkerColor, radius = radius, center = markerCenter)
         }
-        Text(
-            text = "1:1 relative movement",
-            color = TouchSurfaceBorder,
-            style = MaterialTheme.typography.bodySmall,
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp),
-        )
     }
 }
 
@@ -1199,7 +1254,7 @@ private fun MouseButtonControls(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(bottom = 8.dp),
+            .padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         MouseButtonControl(
@@ -1233,7 +1288,8 @@ private fun MouseButtonControl(
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
-            .background(if (isDown) MarkerColor else TouchSurfaceBackground)
+            .heightIn(min = 68.dp)
+            .background(if (isDown) ButtonPressedBackground else ButtonBackground)
             .border(2.dp, TouchSurfaceBorder)
             .pointerInput(button) {
                 var pointerDown = false
@@ -1256,11 +1312,11 @@ private fun MouseButtonControl(
                     if (pointerDown) onButtonUp(button)
                 }
             }
-            .padding(vertical = 16.dp),
+            .padding(vertical = 18.dp),
     ) {
         Text(
             text = label,
-            color = Color.White,
+            color = PrimaryText,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -1268,29 +1324,66 @@ private fun MouseButtonControl(
 }
 
 @Composable
-private fun MouseDiagnosticsPanel(diagnostics: MouseDiagnostics) {
-    Row(modifier = Modifier.fillMaxWidth()) {
-        listOf(
-            "Left button: ${if (diagnostics.leftButtonDown) "DOWN" else "UP"}",
-            "Right button: ${if (diagnostics.rightButtonDown) "DOWN" else "UP"}",
-            "Drag source: ${diagnostics.dragSource.label}",
-            "Drag active: ${diagnostics.dragActive}",
-            "Last button action: ${diagnostics.lastButtonAction}",
-            "Last gesture: ${diagnostics.lastGesture}",
-        ).forEach { value ->
-            Text(
-                text = value,
-                color = Color.White,
-                fontWeight = FontWeight.Medium,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f)
-                    .padding(end = 4.dp),
+private fun MouseDiagnosticsPanel(
+    diagnostics: MouseDiagnostics,
+    displayId: Int,
+    isScummVMConnected: Boolean,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .background(StatusBackground)
+            .border(1.dp, TouchSurfaceBorder)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth()) {
+            DiagnosticValue(
+                value = "LEFT: ${if (diagnostics.leftButtonDown) "DOWN" else "UP"}",
+                modifier = Modifier.weight(1f),
+            )
+            DiagnosticValue(
+                value = "RIGHT: ${if (diagnostics.rightButtonDown) "DOWN" else "UP"}",
+                modifier = Modifier.weight(1f),
+            )
+            val dragState = if (diagnostics.dragActive) {
+                "ACTIVE (${diagnostics.dragSource.label})"
+            } else {
+                "INACTIVE"
+            }
+            DiagnosticValue(
+                value = "DRAG: $dragState",
+                modifier = Modifier.weight(2f),
+            )
+        }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            DiagnosticValue(
+                value = "LAST GESTURE: ${diagnostics.lastGesture}",
+                modifier = Modifier.weight(1f),
+            )
+            DiagnosticValue(value = "DISPLAY: $displayId")
+            DiagnosticValue(
+                value = if (isScummVMConnected) "CONNECTED" else "DISCONNECTED",
+                modifier = Modifier.padding(start = 16.dp),
             )
         }
     }
+}
+
+@Composable
+private fun DiagnosticValue(
+    value: String,
+    modifier: Modifier = Modifier,
+) {
+    Text(
+        text = value,
+        color = SecondaryText,
+        fontWeight = FontWeight.Medium,
+        style = MaterialTheme.typography.labelMedium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier.padding(end = 8.dp),
+    )
 }
 
 private data class MouseDiagnostics(
@@ -1354,10 +1447,15 @@ private enum class TouchAction(val label: String) {
     POINTER_UP("POINTER_UP"),
 }
 
-private val TrackpadBackground = Color(0xFF6B1D2A)
-private val TouchSurfaceBackground = Color(0xFF2D0B13)
-private val TouchSurfaceBorder = Color(0xFFFFB3C1)
-private val MarkerColor = Color(0xFF00E5FF)
+private val TrackpadBackground = Color(0xFF181A1D)
+private val TouchSurfaceBackground = Color(0xFF24272B)
+private val TouchSurfaceBorder = Color(0xFF5A6068)
+private val ButtonBackground = Color(0xFF2D3136)
+private val ButtonPressedBackground = Color(0xFF4B5158)
+private val StatusBackground = Color(0xFF202328)
+private val PrimaryText = Color(0xFFF2F3F5)
+private val SecondaryText = Color(0xFFB8BDC4)
+private val MarkerColor = Color(0xFFD9DDE2)
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private const val MaxMoveEventCount = 999_999
