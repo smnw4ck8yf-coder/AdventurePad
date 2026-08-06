@@ -43,11 +43,16 @@ import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class TrackpadActivity : ComponentActivity() {
     private var lifecycleEvent by mutableStateOf("INITIALIZING")
@@ -81,6 +86,7 @@ class TrackpadActivity : ComponentActivity() {
                     mouseDiagnostics = mouseDiagnostics,
                     gestureResetGeneration = gestureResetGeneration,
                     onGesture = ::handleTrackpadGesture,
+                    onGestureDiagnostic = ::recordGestureDiagnostic,
                     onButtonDown = ::pressDedicatedButton,
                     onButtonUp = ::releaseDedicatedButton,
                     onRestoreBothScreens = ::restoreBothScreens,
@@ -107,6 +113,7 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     override fun onStop() {
+        releaseAllMouseButtons("STOP")
         recordLifecycle("STOPPED")
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
@@ -255,12 +262,36 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun handleTrackpadGesture(gesture: TrackpadGesture) {
-        mouseDiagnostics = mouseDiagnostics.copy(lastGesture = gesture.label)
+        recordGestureDiagnostic(gesture.label)
         when (gesture) {
             TrackpadGesture.SINGLE_TAP -> sendTapLeftClick()
             TrackpadGesture.TWO_FINGER_RIGHT_CLICK -> sendTwoFingerRightClick()
+            TrackpadGesture.DOUBLE_TAP_HOLD_START -> startDoubleTapHoldDrag()
+            TrackpadGesture.DOUBLE_TAP_HOLD_END -> releaseMouseButton(
+                ScummVMMouseButton.LEFT,
+                MouseButtonSource.DOUBLE_TAP_HOLD,
+            )
             TrackpadGesture.CANCELLED -> Unit
         }
+    }
+
+    private fun startDoubleTapHoldDrag() {
+        val activeLeftSources = mouseButtonSources.getValue(ScummVMMouseButton.LEFT)
+        if (MouseButtonSource.DEDICATED_BUTTON in activeLeftSources ||
+            MouseButtonSource.CONTROLLER in activeLeftSources ||
+            MouseButtonSource.DOUBLE_TAP_HOLD in activeLeftSources
+        ) {
+            recordGestureDiagnostic("DRAG ACTIVATION BLOCKED: LEFT ALREADY HELD")
+            return
+        }
+        mainHandler.removeCallbacks(tapLeftButtonRelease)
+        releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
+        pressMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.DOUBLE_TAP_HOLD)
+    }
+
+    private fun recordGestureDiagnostic(message: String) {
+        mouseDiagnostics = mouseDiagnostics.copy(lastGesture = message)
+        Log.i(GESTURE_TAG, message)
     }
 
     private fun sendTwoFingerRightClick() {
@@ -277,10 +308,12 @@ class TrackpadActivity : ComponentActivity() {
     ): Boolean {
         val sources = mouseButtonSources.getValue(button)
         if (!sources.add(source)) return true
+        updateDragDiagnostics()
         if (sources.size > 1) return true
 
         if (!ScummVMInputClient.sendButtonEvent(button.downEvent)) {
             sources.remove(source)
+            updateDragDiagnostics()
             return false
         }
         updateMouseDiagnostics(button, isDown = true)
@@ -293,6 +326,7 @@ class TrackpadActivity : ComponentActivity() {
     ): Boolean {
         val sources = mouseButtonSources.getValue(button)
         if (!sources.remove(source)) return false
+        updateDragDiagnostics()
         if (sources.isNotEmpty()) return true
 
         ScummVMInputClient.sendButtonEvent(button.upEvent)
@@ -302,7 +336,7 @@ class TrackpadActivity : ComponentActivity() {
 
     private fun releaseAllMouseButtons(reason: String) {
         gestureResetGeneration++
-        mouseDiagnostics = mouseDiagnostics.copy(lastGesture = TrackpadGesture.CANCELLED.label)
+        recordGestureDiagnostic("GESTURE CANCELLED: $reason")
         mainHandler.removeCallbacks(tapLeftButtonRelease)
         ScummVMMouseButton.entries.forEach { button ->
             val sources = mouseButtonSources.getValue(button)
@@ -312,6 +346,7 @@ class TrackpadActivity : ComponentActivity() {
                 updateMouseDiagnostics(button, isDown = false, reason = reason)
             }
         }
+        updateDragDiagnostics()
     }
 
     private fun isMouseButtonSourceDown(
@@ -337,6 +372,19 @@ class TrackpadActivity : ComponentActivity() {
         }
     }
 
+    private fun updateDragDiagnostics() {
+        val leftSources = mouseButtonSources.getValue(ScummVMMouseButton.LEFT)
+        val dragSource = when {
+            MouseButtonSource.DEDICATED_BUTTON in leftSources -> DragSource.DEDICATED_LEFT
+            MouseButtonSource.DOUBLE_TAP_HOLD in leftSources -> DragSource.DOUBLE_TAP_HOLD
+            else -> DragSource.NONE
+        }
+        mouseDiagnostics = mouseDiagnostics.copy(
+            dragSource = dragSource,
+            dragActive = dragSource != DragSource.NONE,
+        )
+    }
+
     private fun runtimeDiagnostics() = ActivityRuntimeDiagnostics(
         displayId = currentDisplayId,
         taskId = taskId,
@@ -358,6 +406,7 @@ class TrackpadActivity : ComponentActivity() {
 
     private companion object {
         const val TAG = "AdventurePadLifecycle"
+        const val GESTURE_TAG = "AdventurePadGesture"
     }
 }
 
@@ -366,6 +415,7 @@ private fun TrackpadTouchTestScreen(
     mouseDiagnostics: MouseDiagnostics,
     gestureResetGeneration: Int,
     onGesture: (TrackpadGesture) -> Unit,
+    onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
     onRestoreBothScreens: () -> Unit,
@@ -386,6 +436,7 @@ private fun TrackpadTouchTestScreen(
             touchState = touchState,
             gestureResetGeneration = gestureResetGeneration,
             onGesture = onGesture,
+            onGestureDiagnostic = onGestureDiagnostic,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
@@ -435,10 +486,12 @@ private fun TouchSurface(
     touchState: MutableState<TouchState>,
     gestureResetGeneration: Int,
     onGesture: (TrackpadGesture) -> Unit,
+    onGestureDiagnostic: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
     val viewConfiguration = LocalViewConfiguration.current
+    val androidViewConfiguration = ViewConfiguration.get(LocalContext.current)
 
     Box(
         modifier = modifier
@@ -450,26 +503,57 @@ private fun TouchSurface(
                     surfaceHeight = surfaceSize.height.toFloat(),
                 )
             }
-            .pointerInput(viewConfiguration.touchSlop, gestureResetGeneration) {
-                val gestureTracker = TrackpadGestureTracker(
-                    singleTapMaximumDurationMillis = ViewConfiguration.getTapTimeout().toLong(),
-                    twoFingerTapMaximumDurationMillis = TwoFingerTapMaximumDurationMillis,
-                    maximumDistance = viewConfiguration.touchSlop,
-                )
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val gestureUpdate = gestureTracker.handle(event)
-                        gestureUpdate.gesture?.let(onGesture)
-                        val nextState = handlePointerEvent(
-                            event = event,
-                            previousState = touchState.value,
-                            surfaceWidth = size.width.toFloat(),
-                            surfaceHeight = size.height.toFloat(),
-                            allowMovement = gestureUpdate.allowMovement,
-                        )
-                        touchState.value = nextState
-                        event.changes.forEach(PointerInputChange::consume)
+            .pointerInput(
+                viewConfiguration.touchSlop,
+                androidViewConfiguration.scaledDoubleTapSlop,
+                gestureResetGeneration,
+            ) {
+                coroutineScope {
+                    val holdTimeoutMillis = ViewConfiguration.getLongPressTimeout().toLong()
+                    val gestureTracker = TrackpadGestureTracker(
+                        singleTapMaximumDurationMillis = ViewConfiguration.getTapTimeout().toLong(),
+                        twoFingerTapMaximumDurationMillis = TwoFingerTapMaximumDurationMillis,
+                        doubleTapTimeoutMillis = ViewConfiguration.getDoubleTapTimeout().toLong(),
+                        holdTimeoutMillis = holdTimeoutMillis,
+                        touchSlop = viewConfiguration.touchSlop,
+                        doubleTapSlop = androidViewConfiguration.scaledDoubleTapSlop.toFloat(),
+                    )
+                    var holdJob: Job? = null
+                    val pointerInputScope = this
+                    try {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                val gestureUpdate = gestureTracker.handle(event)
+                                if (gestureUpdate.cancelHold) {
+                                    holdJob?.cancel()
+                                    holdJob = null
+                                }
+                                if (gestureUpdate.scheduleHold) {
+                                    holdJob?.cancel()
+                                    holdJob = pointerInputScope.launch {
+                                        delay(holdTimeoutMillis)
+                                        gestureTracker.handleHoldTimeout()?.let(onGesture)
+                                    }
+                                }
+                                gestureUpdate.diagnostics.forEach(onGestureDiagnostic)
+                                gestureUpdate.gesture?.let(onGesture)
+                                val nextState = handlePointerEvent(
+                                    event = event,
+                                    previousState = touchState.value,
+                                    surfaceWidth = size.width.toFloat(),
+                                    surfaceHeight = size.height.toFloat(),
+                                    allowMovement = gestureUpdate.allowMovement,
+                                    updateMovementBaseline = gestureUpdate.updateMovementBaseline,
+                                    resetMovementBaseline = gestureUpdate.resetMovementBaseline,
+                                )
+                                touchState.value = nextState
+                                event.changes.forEach(PointerInputChange::consume)
+                            }
+                        }
+                    } finally {
+                        holdJob?.cancel()
+                        gestureTracker.cancelActiveGesture()?.let(onGesture)
                     }
                 }
             },
@@ -512,13 +596,20 @@ private fun TouchSurface(
 private class TrackpadGestureTracker(
     private val singleTapMaximumDurationMillis: Long,
     private val twoFingerTapMaximumDurationMillis: Long,
-    maximumDistance: Float,
+    private val doubleTapTimeoutMillis: Long,
+    private val holdTimeoutMillis: Long,
+    touchSlop: Float,
+    doubleTapSlop: Float,
 ) {
-    private val maximumDistanceSquared = maximumDistance * maximumDistance
+    private val touchSlopSquared = touchSlop * touchSlop
+    private val doubleTapSlopSquared = doubleTapSlop * doubleTapSlop
     private val initialPositions = mutableMapOf<PointerId, Offset>()
     private var downUptimeMillis = 0L
+    private var lastTapUpUptimeMillis = Long.MIN_VALUE
+    private var lastTapPosition: Offset? = null
     private var state = GestureTrackingState.IDLE
     private var cancellationReported = false
+    private var pendingMovementReported = false
 
     fun handle(event: PointerEvent): GestureUpdate {
         val pressedCount = event.changes.count { it.pressed }
@@ -528,12 +619,47 @@ private class TrackpadGestureTracker(
                     val pointer = event.changes.first { it.pressed }
                     initialPositions[pointer.id] = pointer.position
                     downUptimeMillis = pointer.uptimeMillis
-                    state = GestureTrackingState.SINGLE_PENDING
-                } else if (state == GestureTrackingState.SINGLE_PENDING && pressedCount == 2) {
+                    val previousTapPosition = lastTapPosition
+                    val sincePreviousTap = pointer.uptimeMillis - lastTapUpUptimeMillis
+                    val hasPreviousTap = previousTapPosition != null
+                    val withinTime = sincePreviousTap in 0..doubleTapTimeoutMillis
+                    val withinDistance = previousTapPosition != null &&
+                        (pointer.position - previousTapPosition).getDistanceSquared() <=
+                        doubleTapSlopSquared
+                    val isSecondTap = hasPreviousTap && withinTime && withinDistance
+                    val diagnostics = when {
+                        isSecondTap -> listOf(
+                            "VALID SECOND TAP DETECTED",
+                            "HOLD TIMER STARTED",
+                        )
+                        hasPreviousTap && !withinTime -> listOf("SECOND TAP REJECTED: TIME")
+                        hasPreviousTap && !withinDistance -> listOf("SECOND TAP REJECTED: DISTANCE")
+                        else -> emptyList()
+                    }
+                    state = if (isSecondTap) {
+                        clearPreviousTap()
+                        GestureTrackingState.SECOND_TAP_HOLD_PENDING
+                    } else {
+                        GestureTrackingState.SINGLE_PENDING
+                    }
+                    return GestureUpdate(
+                        scheduleHold = isSecondTap,
+                        diagnostics = diagnostics,
+                    )
+                } else if ((state == GestureTrackingState.SINGLE_PENDING ||
+                        state == GestureTrackingState.SECOND_TAP_HOLD_PENDING) &&
+                    pressedCount == 2
+                ) {
                     event.changes.filter { it.pressed }.forEach { pointer ->
                         initialPositions.putIfAbsent(pointer.id, pointer.position)
                     }
+                    clearPreviousTap()
                     state = GestureTrackingState.TWO_FINGER_PENDING
+                    return GestureUpdate(cancelHold = true)
+                } else if (state == GestureTrackingState.SECOND_TAP_HOLD_PENDING ||
+                    state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE
+                ) {
+                    return cancel(endActiveDrag = true)
                 } else {
                     return cancel()
                 }
@@ -545,13 +671,43 @@ private class TrackpadGestureTracker(
                         val pointer = event.changes.singleOrNull { it.pressed }
                         val initialPosition = pointer?.let { initialPositions[it.id] }
                         if (pointer == null || initialPosition == null) return cancel()
-                        if (pointer.distanceSquaredFrom(initialPosition) > maximumDistanceSquared) {
+                        if (pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared) {
                             state = GestureTrackingState.SINGLE_MOVING
+                            clearPreviousTap()
                             return GestureUpdate(
                                 gesture = reportCancellationOnce(),
                                 allowMovement = true,
                             )
                         }
+                    }
+                    GestureTrackingState.SECOND_TAP_HOLD_PENDING -> {
+                        val pointer = event.changes.singleOrNull { it.pressed }
+                        val initialPosition = pointer?.let { initialPositions[it.id] }
+                        if (pointer == null || initialPosition == null) return cancel()
+                        val diagnostics = if (pendingMovementReported) {
+                            emptyList()
+                        } else {
+                            pendingMovementReported = true
+                            listOf("MOVEMENT SEEN WHILE PENDING")
+                        }
+                        if (pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared) {
+                            state = GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE
+                            return GestureUpdate(
+                                gesture = TrackpadGesture.DOUBLE_TAP_HOLD_START,
+                                allowMovement = true,
+                                cancelHold = true,
+                                resetMovementBaseline = true,
+                                diagnostics = diagnostics,
+                            )
+                        }
+                        return GestureUpdate(
+                            updateMovementBaseline = true,
+                            diagnostics = diagnostics,
+                        )
+                    }
+                    GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE -> {
+                        if (pressedCount == 1) return GestureUpdate(allowMovement = true)
+                        return cancel(endActiveDrag = true)
                     }
                     GestureTrackingState.SINGLE_MOVING -> {
                         if (pressedCount == 1) return GestureUpdate(allowMovement = true)
@@ -581,8 +737,21 @@ private class TrackpadGestureTracker(
                     val finalUptimeMillis = event.changes.maxOfOrNull { it.uptimeMillis }
                         ?: downUptimeMillis
                     val duration = finalUptimeMillis - downUptimeMillis
-                    val gesture = when (state) {
+                    val completedState = state
+                    val gesture = when (completedState) {
                         GestureTrackingState.SINGLE_PENDING -> {
+                            if (!hasPointerExceededTolerance(event) &&
+                                duration in 0..singleTapMaximumDurationMillis
+                            ) {
+                                lastTapUpUptimeMillis = finalUptimeMillis
+                                lastTapPosition = initialPositions.values.singleOrNull()
+                                TrackpadGesture.SINGLE_TAP
+                            } else {
+                                clearPreviousTap()
+                                TrackpadGesture.CANCELLED
+                            }
+                        }
+                        GestureTrackingState.SECOND_TAP_HOLD_PENDING -> {
                             if (!hasPointerExceededTolerance(event) &&
                                 duration in 0..singleTapMaximumDurationMillis
                             ) {
@@ -591,6 +760,8 @@ private class TrackpadGestureTracker(
                                 TrackpadGesture.CANCELLED
                             }
                         }
+                        GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE ->
+                            TrackpadGesture.DOUBLE_TAP_HOLD_END
                         GestureTrackingState.TWO_FINGER_PENDING -> {
                             if (initialPositions.size == 2 &&
                                 duration in 0..twoFingerTapMaximumDurationMillis
@@ -604,33 +775,79 @@ private class TrackpadGestureTracker(
                         GestureTrackingState.CANCELLED -> reportCancellationOnce()
                         GestureTrackingState.IDLE -> null
                     }
-                    reset()
-                    return GestureUpdate(gesture = gesture)
+                    resetCurrentGesture()
+                    return GestureUpdate(
+                        gesture = gesture,
+                        cancelHold = true,
+                        diagnostics = if (completedState == GestureTrackingState.SINGLE_PENDING &&
+                            gesture == TrackpadGesture.SINGLE_TAP
+                        ) {
+                            listOf("FIRST TAP RECORDED")
+                        } else {
+                            emptyList()
+                        },
+                    )
                 }
             }
 
             PointerEventType.Unknown -> if (state != GestureTrackingState.IDLE) {
-                val gesture = reportCancellationOnce()
-                reset()
-                return GestureUpdate(gesture = gesture)
+                val gesture = if (state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE) {
+                    TrackpadGesture.DOUBLE_TAP_HOLD_END
+                } else {
+                    reportCancellationOnce()
+                }
+                resetCurrentGesture()
+                return GestureUpdate(
+                    gesture = gesture,
+                    cancelHold = true,
+                    diagnostics = listOf("GESTURE CANCELLED"),
+                )
             }
         }
         return GestureUpdate()
+    }
+
+    fun handleHoldTimeout(): TrackpadGesture? {
+        if (state != GestureTrackingState.SECOND_TAP_HOLD_PENDING) return null
+        val elapsed = android.os.SystemClock.uptimeMillis() - downUptimeMillis
+        if (elapsed < holdTimeoutMillis) return null
+        state = GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE
+        return TrackpadGesture.DOUBLE_TAP_HOLD_START
+    }
+
+    fun cancelActiveGesture(): TrackpadGesture? {
+        val gesture = if (state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE) {
+            TrackpadGesture.DOUBLE_TAP_HOLD_END
+        } else {
+            null
+        }
+        resetCurrentGesture()
+        return gesture
     }
 
     private fun hasPointerExceededTolerance(event: PointerEvent): Boolean =
         event.changes.any { pointer ->
             val initialPosition = initialPositions[pointer.id]
             initialPosition == null ||
-                pointer.distanceSquaredFrom(initialPosition) > maximumDistanceSquared
+                pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared
         }
 
     private fun PointerInputChange.distanceSquaredFrom(position: Offset): Float =
         (this.position - position).getDistanceSquared()
 
-    private fun cancel(): GestureUpdate {
+    private fun cancel(endActiveDrag: Boolean = false): GestureUpdate {
+        val gesture = if (endActiveDrag && state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE) {
+            TrackpadGesture.DOUBLE_TAP_HOLD_END
+        } else {
+            reportCancellationOnce()
+        }
         state = GestureTrackingState.CANCELLED
-        return GestureUpdate(gesture = reportCancellationOnce())
+        clearPreviousTap()
+        return GestureUpdate(
+            gesture = gesture,
+            cancelHold = true,
+            diagnostics = listOf("GESTURE CANCELLED"),
+        )
     }
 
     private fun reportCancellationOnce(): TrackpadGesture? {
@@ -639,22 +856,35 @@ private class TrackpadGestureTracker(
         return TrackpadGesture.CANCELLED
     }
 
-    private fun reset() {
+    private fun resetCurrentGesture() {
         initialPositions.clear()
         downUptimeMillis = 0L
         state = GestureTrackingState.IDLE
         cancellationReported = false
+        pendingMovementReported = false
+    }
+
+    private fun clearPreviousTap() {
+        lastTapUpUptimeMillis = Long.MIN_VALUE
+        lastTapPosition = null
     }
 }
 
 private data class GestureUpdate(
     val gesture: TrackpadGesture? = null,
     val allowMovement: Boolean = false,
+    val scheduleHold: Boolean = false,
+    val cancelHold: Boolean = false,
+    val updateMovementBaseline: Boolean = false,
+    val resetMovementBaseline: Boolean = false,
+    val diagnostics: List<String> = emptyList(),
 )
 
 private enum class GestureTrackingState {
     IDLE,
     SINGLE_PENDING,
+    SECOND_TAP_HOLD_PENDING,
+    DOUBLE_TAP_HOLD_ACTIVE,
     SINGLE_MOVING,
     TWO_FINGER_PENDING,
     CANCELLED,
@@ -669,6 +899,8 @@ private fun handlePointerEvent(
     surfaceWidth: Float,
     surfaceHeight: Float,
     allowMovement: Boolean,
+    updateMovementBaseline: Boolean,
+    resetMovementBaseline: Boolean,
 ): TouchState {
     val state = previousState.withSurfaceSize(surfaceWidth, surfaceHeight)
     val activePointerCount = event.changes.count { it.pressed }
@@ -715,6 +947,25 @@ private fun handlePointerEvent(
         }
 
         TouchAction.MOVE -> {
+            if (updateMovementBaseline || resetMovementBaseline) {
+                val trackedPointer = event.findPressedPointer(state.trackedPointerId)
+                return if (trackedPointer == null) {
+                    state.copy(
+                        deltaX = 0f,
+                        deltaY = 0f,
+                        pointerCount = activePointerCount,
+                        action = TouchAction.MOVE,
+                    )
+                } else {
+                    state.withResetBaseline(
+                        pointer = trackedPointer,
+                        pointerCount = activePointerCount,
+                        action = TouchAction.MOVE,
+                        surfaceWidth = surfaceWidth,
+                        surfaceHeight = surfaceHeight,
+                    )
+                }
+            }
             if (!allowMovement) {
                 return state.copy(
                     deltaX = 0f,
@@ -1022,7 +1273,8 @@ private fun MouseDiagnosticsPanel(diagnostics: MouseDiagnostics) {
         listOf(
             "Left button: ${if (diagnostics.leftButtonDown) "DOWN" else "UP"}",
             "Right button: ${if (diagnostics.rightButtonDown) "DOWN" else "UP"}",
-            "Drag: ${if (diagnostics.leftButtonDown) "ACTIVE" else "INACTIVE"}",
+            "Drag source: ${diagnostics.dragSource.label}",
+            "Drag active: ${diagnostics.dragActive}",
             "Last button action: ${diagnostics.lastButtonAction}",
             "Last gesture: ${diagnostics.lastGesture}",
         ).forEach { value ->
@@ -1044,6 +1296,8 @@ private fun MouseDiagnosticsPanel(diagnostics: MouseDiagnostics) {
 private data class MouseDiagnostics(
     val leftButtonDown: Boolean = false,
     val rightButtonDown: Boolean = false,
+    val dragSource: DragSource = DragSource.NONE,
+    val dragActive: Boolean = false,
     val lastButtonAction: String = "NONE",
     val lastGesture: String = TrackpadGesture.NONE_LABEL,
 )
@@ -1053,6 +1307,13 @@ private enum class MouseButtonSource {
     CONTROLLER,
     TRACKPAD_TAP,
     TRACKPAD_TWO_FINGER_TAP,
+    DOUBLE_TAP_HOLD,
+}
+
+private enum class DragSource(val label: String) {
+    NONE("NONE"),
+    DEDICATED_LEFT("DEDICATED LEFT"),
+    DOUBLE_TAP_HOLD("DOUBLE-TAP HOLD"),
 }
 
 private const val TapClickDurationMillis = 50L
@@ -1061,6 +1322,8 @@ private const val TwoFingerTapMaximumDurationMillis = 250L
 private enum class TrackpadGesture(val label: String) {
     SINGLE_TAP("SINGLE TAP"),
     TWO_FINGER_RIGHT_CLICK("TWO-FINGER RIGHT CLICK"),
+    DOUBLE_TAP_HOLD_START("DRAG ACTIVATED: DOUBLE-TAP HOLD"),
+    DOUBLE_TAP_HOLD_END("DRAG RELEASED: DOUBLE-TAP HOLD"),
     CANCELLED("CANCELLED");
 
     companion object {
