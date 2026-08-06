@@ -2,63 +2,70 @@
 
 AdventurePad is a companion application for ScummVM designed specifically for dual-screen Android handhelds such as the AYN Thor.
 
-It places the game on the upper display while providing a dedicated touch trackpad and controller interface on the lower display, creating a Nintendo DS-style point-and-click experience.
+It transforms classic point-and-click adventures into a Nintendo DS-style experience by displaying the game on the upper screen while providing a dedicated touch trackpad and controls on the lower screen.
 
 ## Current Features
 
-- Automatic dual-screen launch
+### Dual-display
+
+- ✅ Live mirrored ScummVM rendering on the lower display
+- ✅ Automatic detection of the secondary display
+- ✅ Automatic connection to ScummVM
+- ✅ Restore Both Screens recovery
+- ✅ Automatic reconnection after surface recreation
+
+### Input
+
 - Large relative touch trackpad
 - Single-tap left click
 - Two-finger right click
 - Double-tap-and-hold drag
-- Dedicated Left and Right mouse buttons
+- Dedicated left/right mouse buttons
 - Controller support
-    - Left stick → cursor
-    - A → Left Click
-    - B → Right Click
-- Restore Both Screens button
-- Automatic reconnection if AdventurePad is reopened
+  - Left stick → cursor
+  - A → Left click
+  - B → Right click
+
+### Reliability
+
 - Robust mouse ownership system preventing duplicate DOWN/UP events
+- Safe mirror surface recreation
+- Automatic recovery after display reconnects
 
 ## Tested
 
-Successfully tested with:
+Hardware:
+
+- ✅ AYN Thor dual-screen Android handheld
+
+Games:
 
 - Indiana Jones and the Fate of Atlantis
 - Beneath a Steel Sky
 
 ## Project Status
 
-Current milestone:
+### Current milestone
 
-✅ Reliable mouse input system complete.
+✅ **Proof of concept complete**
 
-Next planned work includes:
+AdventurePad now demonstrates:
 
-- Improved UI polish
-- Adventure game themed interface
+- live dual-display rendering
+- independent lower-screen touch controls
+- reliable communication with ScummVM
+- hardware validation on the AYN Thor
+
+### Planned work
+
+- Adventure-themed UI
 - Per-game layouts
-- Additional quality-of-life features
+- Bottom-screen action panels
+- Notes and hint system
+- Gesture improvements
+- Two-finger scrolling
+- Community themes
 
 ## Building
 
-```bash
-./gradlew installDebug
-```
-
-If Java cannot be found:
-
-```bash
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
-export PATH="$JAVA_HOME/bin:$PATH"
-```
-
-Then run:
-
-```bash
-./gradlew installDebug
-```
-
-## License
-
-Work in progress.
+...
