@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
@@ -35,6 +36,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -59,6 +61,7 @@ import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import kotlinx.coroutines.Job
@@ -75,7 +78,10 @@ class TrackpadActivity : ComponentActivity() {
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
     private var mouseDiagnostics by mutableStateOf(MouseDiagnostics())
     private var connectionDiagnostics by mutableStateOf(ScummVMConnectionDiagnostics())
+    private var mirrorOutputStatus by mutableStateOf(MirrorOutputStatus())
     private var gestureResetGeneration by mutableStateOf(0)
+    private var mirrorSurfaceView: MirrorSurfaceView? = null
+    private var mirrorLifecycleActive = false
     private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
         mutableSetOf<MouseButtonSource>()
     }
@@ -108,6 +114,7 @@ class TrackpadActivity : ComponentActivity() {
                     mouseDiagnostics = mouseDiagnostics,
                     displayId = currentDisplayId,
                     connectionDiagnostics = connectionDiagnostics,
+                    mirrorOutputStatus = mirrorOutputStatus,
                     gestureResetGeneration = gestureResetGeneration,
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
@@ -120,6 +127,9 @@ class TrackpadActivity : ComponentActivity() {
                     onGestureDiagnostic = ::recordGestureDiagnostic,
                     onButtonDown = ::pressDedicatedButton,
                     onButtonUp = ::releaseDedicatedButton,
+                    onMirrorViewAvailable = ::onMirrorViewAvailable,
+                    onMirrorViewDisposed = ::onMirrorViewDisposed,
+                    onRestoreTrackpad = ::restoreTrackpad,
                     onRestoreBothScreens = ::restoreBothScreens,
                 )
             }
@@ -131,19 +141,29 @@ class TrackpadActivity : ComponentActivity() {
         ScummVMInputClient.setConnectionStateListener { updatedDiagnostics ->
             val connectionWasLost = connectionDiagnostics.isConnected &&
                 !updatedDiagnostics.isConnected
+            val connectionWasEstablished = !connectionDiagnostics.isConnected &&
+                updatedDiagnostics.isConnected
             connectionDiagnostics = updatedDiagnostics
             if (connectionWasLost) discardLocalInputState("CONNECTION LOSS")
+            if (connectionWasEstablished) {
+                mirrorSurfaceView?.refreshAttachment(currentDisplayId)
+            }
         }
+        ScummVMInputClient.setMirrorStatusListener { status -> mirrorOutputStatus = status }
         ScummVMInputClient.bind(this)
         recordLifecycle("STARTED")
     }
 
     override fun onResume() {
         super.onResume()
+        mirrorLifecycleActive = true
+        mirrorSurfaceView?.activate(currentDisplayId)
         recordLifecycle("RESUMED")
     }
 
     override fun onPause() {
+        mirrorLifecycleActive = false
+        mirrorSurfaceView?.deactivate()
         releaseAllMouseButtons("PAUSE")
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
@@ -158,6 +178,7 @@ class TrackpadActivity : ComponentActivity() {
         ScummVMInputClient.releaseJoystickAxes()
         ScummVMInputClient.unbind()
         ScummVMInputClient.setConnectionStateListener(null)
+        ScummVMInputClient.setMirrorStatusListener(null)
         super.onStop()
     }
 
@@ -227,6 +248,9 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        mirrorLifecycleActive = false
+        mirrorSurfaceView?.dispose()
+        mirrorSurfaceView = null
         releaseAllMouseButtons("DESTROY")
         recordLifecycle("DESTROYED")
         super.onDestroy()
@@ -239,6 +263,7 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        mirrorSurfaceView?.deactivate()
         releaseAllMouseButtons("NEW INTENT")
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
@@ -248,9 +273,34 @@ class TrackpadActivity : ComponentActivity() {
             ?.let { "Received launch request: $it" }
             ?: "Received a new intent without a launch reason."
         recordLifecycle("NEW_INTENT")
+        if (mirrorLifecycleActive) mirrorSurfaceView?.activate(currentDisplayId)
+    }
+
+    private fun onMirrorViewAvailable(view: MirrorSurfaceView) {
+        if (mirrorSurfaceView === view) return
+        mirrorSurfaceView?.dispose()
+        mirrorSurfaceView = view
+        if (mirrorLifecycleActive) view.activate(currentDisplayId)
+    }
+
+    private fun onMirrorViewDisposed(view: MirrorSurfaceView) {
+        if (mirrorSurfaceView !== view) return
+        view.dispose()
+        mirrorSurfaceView = null
+    }
+
+    private fun restoreTrackpad() {
+        mirrorSurfaceView?.deactivate()
+        releaseAllMouseButtons("RESTORE TRACKPAD")
+        lastLaunchResult = "Trackpad restore in progress…"
+        lastLaunchResult = DualDisplayCoordinator.launchTrackpad(
+            activity = this,
+            reason = "Trackpad restore requested",
+        ).message
     }
 
     private fun restoreBothScreens() {
+        mirrorSurfaceView?.deactivate()
         releaseAllMouseButtons("RESTORE")
         lastLaunchResult = "Restore in progress…"
         lastLaunchResult = DualDisplayCoordinator.restoreBoth(this).message
@@ -513,6 +563,7 @@ private fun AdventurePadScreen(
     mouseDiagnostics: MouseDiagnostics,
     displayId: Int,
     connectionDiagnostics: ScummVMConnectionDiagnostics,
+    mirrorOutputStatus: MirrorOutputStatus,
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
@@ -521,6 +572,9 @@ private fun AdventurePadScreen(
     onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
+    onMirrorViewAvailable: (MirrorSurfaceView) -> Unit,
+    onMirrorViewDisposed: (MirrorSurfaceView) -> Unit,
+    onRestoreTrackpad: () -> Unit,
     onRestoreBothScreens: () -> Unit,
 ) {
     val touchState = remember { mutableStateOf(TouchState()) }
@@ -554,7 +608,13 @@ private fun AdventurePadScreen(
                     settingsVisible = true
                 },
                 onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
-                onRestoreBothScreens = onRestoreBothScreens,
+                onRestoreTrackpad = onRestoreTrackpad,
+            )
+
+            MirrorPrototypePanel(
+                status = mirrorOutputStatus,
+                onViewAvailable = onMirrorViewAvailable,
+                onViewDisposed = onMirrorViewDisposed,
             )
 
             TouchSurface(
@@ -575,6 +635,7 @@ private fun AdventurePadScreen(
                     diagnostics = mouseDiagnostics,
                     displayId = displayId,
                     connectionDiagnostics = connectionDiagnostics,
+                    onRestoreBothScreens = onRestoreBothScreens,
                 )
             }
 
@@ -582,6 +643,64 @@ private fun AdventurePadScreen(
                 diagnostics = mouseDiagnostics,
                 onButtonDown = onButtonDown,
                 onButtonUp = onButtonUp,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MirrorPrototypePanel(
+    status: MirrorOutputStatus,
+    onViewAvailable: (MirrorSurfaceView) -> Unit,
+    onViewDisposed: (MirrorSurfaceView) -> Unit,
+) {
+    val context = LocalContext.current
+    val mirrorView = remember(context) { MirrorSurfaceView(context).apply { alpha = 0f } }
+
+    DisposableEffect(mirrorView) {
+        onViewAvailable(mirrorView)
+        onDispose { onViewDisposed(mirrorView) }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .background(TouchSurfaceBackground)
+            .border(1.dp, TouchSurfaceBorder)
+            .padding(6.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "LIVE INTERFACE PANEL — PROTOTYPE",
+                color = PrimaryText,
+                fontWeight = FontWeight.Medium,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                text = status.state.label,
+                color = if (status.state == MirrorOutputState.SUPPORTED) PrimaryText else SecondaryText,
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(112.dp)
+                .padding(top = 4.dp)
+                .background(Color.Black),
+        ) {
+            AndroidView(
+                factory = { mirrorView },
+                update = { view ->
+                    view.alpha = if (status.state.shouldShowLiveSurface) 1f else 0f
+                },
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -669,7 +788,7 @@ private fun CompactActivityHeader(
     diagnosticsVisible: Boolean,
     onOpenSettings: () -> Unit,
     onToggleDiagnostics: () -> Unit,
-    onRestoreBothScreens: () -> Unit,
+    onRestoreTrackpad: () -> Unit,
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
@@ -703,13 +822,13 @@ private fun CompactActivityHeader(
             )
         }
         OutlinedButton(
-            onClick = onRestoreBothScreens,
+            onClick = onRestoreTrackpad,
             colors = ButtonDefaults.outlinedButtonColors(contentColor = SecondaryText),
             border = BorderStroke(1.dp, TouchSurfaceBorder),
             modifier = Modifier.padding(start = 4.dp),
         ) {
             Text(
-                text = "RESTORE BOTH SCREENS",
+                text = "RESTORE TRACKPAD",
                 maxLines = 1,
             )
         }
@@ -2200,6 +2319,7 @@ private fun MouseDiagnosticsPanel(
     diagnostics: MouseDiagnostics,
     displayId: Int,
     connectionDiagnostics: ScummVMConnectionDiagnostics,
+    onRestoreBothScreens: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -2258,6 +2378,24 @@ private fun MouseDiagnosticsPanel(
             )
         }
         DiagnosticValue(value = "BUTTON SOURCES: ${diagnostics.activeMouseButtonSources}")
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = "Developer action: can replace the app on the upper display.",
+                color = SecondaryText,
+                style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.weight(1f),
+            )
+            OutlinedButton(
+                onClick = onRestoreBothScreens,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = SecondaryText),
+                border = BorderStroke(1.dp, TouchSurfaceBorder),
+            ) {
+                Text(text = "RESTORE BOTH SCREENS", maxLines = 1)
+            }
+        }
     }
 }
 

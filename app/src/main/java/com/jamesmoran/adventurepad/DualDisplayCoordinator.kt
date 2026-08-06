@@ -14,6 +14,33 @@ internal data class DisplayLaunchResult(
     val message: String,
 )
 
+internal data class DisplayCandidate(
+    val displayId: Int,
+    val name: String,
+    val isPresentationCategory: Boolean,
+    val isValid: Boolean,
+    val supportsPresentation: Boolean,
+    val isPrivate: Boolean,
+    val isAvailable: Boolean,
+    val physicalWidth: Int,
+    val physicalHeight: Int,
+)
+
+internal fun selectEligibleSecondaryDisplayId(candidates: List<DisplayCandidate>): Int? =
+    candidates.firstOrNull { candidate ->
+        val normalizedName = candidate.name.lowercase(Locale.ROOT)
+        val looksVirtual = VirtualDisplayNameMarkers.any(normalizedName::contains)
+        candidate.displayId != Display.DEFAULT_DISPLAY &&
+            candidate.isPresentationCategory &&
+            candidate.isValid &&
+            candidate.supportsPresentation &&
+            !candidate.isPrivate &&
+            candidate.isAvailable &&
+            !looksVirtual &&
+            candidate.physicalWidth > 0 &&
+            candidate.physicalHeight > 0
+    }?.displayId
+
 internal object DualDisplayCoordinator {
     const val EXTRA_LAUNCH_REASON = "com.jamesmoran.adventurepad.LAUNCH_REASON"
 
@@ -110,37 +137,36 @@ internal object DualDisplayCoordinator {
         val presentationDisplayIds = displayManager
             .getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
             .mapTo(mutableSetOf()) { it.displayId }
-        val selectedDisplay = availableDisplays.firstOrNull { candidate ->
-            isEligibleSecondaryDisplay(candidate, presentationDisplayIds)
-        }
+        val selectedDisplayId = selectEligibleSecondaryDisplayId(
+            availableDisplays.map { candidate ->
+                candidate.toDisplayCandidate(candidate.displayId in presentationDisplayIds)
+            },
+        )
+        val selectedDisplay = availableDisplays.firstOrNull { it.displayId == selectedDisplayId }
 
         if (selectedDisplay != null) {
             Log.i(
                 TAG,
-                "Expected AYN Thor secondary display ID is 4; dynamically selected " +
-                    "display ${selectedDisplay.displayId} (${selectedDisplay.name}).",
+                "Dynamically selected secondary display ${selectedDisplay.displayId} " +
+                    "(${selectedDisplay.name}).",
             )
         }
         return selectedDisplay
     }
 
-    private fun isEligibleSecondaryDisplay(
-        candidate: Display,
-        presentationDisplayIds: Set<Int>,
-    ): Boolean {
-        val mode = candidate.mode
-        val normalizedName = candidate.name.lowercase(Locale.ROOT)
-        val looksVirtual = VirtualDisplayNameMarkers.any(normalizedName::contains)
-        return candidate.displayId != Display.DEFAULT_DISPLAY &&
-            candidate.displayId in presentationDisplayIds &&
-            candidate.isValid &&
-            candidate.flags and Display.FLAG_PRESENTATION != 0 &&
-            candidate.flags and Display.FLAG_PRIVATE == 0 &&
-            candidate.state != Display.STATE_OFF &&
-            candidate.state != Display.STATE_UNKNOWN &&
-            !looksVirtual &&
-            mode.physicalWidth > 0 &&
-            mode.physicalHeight > 0
+    private fun Display.toDisplayCandidate(isPresentationCategory: Boolean): DisplayCandidate {
+        val currentMode = mode
+        return DisplayCandidate(
+            displayId = displayId,
+            name = name,
+            isPresentationCategory = isPresentationCategory,
+            isValid = isValid,
+            supportsPresentation = flags and Display.FLAG_PRESENTATION != 0,
+            isPrivate = flags and Display.FLAG_PRIVATE != 0,
+            isAvailable = state != Display.STATE_OFF && state != Display.STATE_UNKNOWN,
+            physicalWidth = currentMode.physicalWidth,
+            physicalHeight = currentMode.physicalHeight,
+        )
     }
 
     private fun checkLaunchAllowed(
@@ -198,16 +224,16 @@ internal object DualDisplayCoordinator {
     ): Intent = Intent(activity, T::class.java)
         .addFlags(TASK_LAUNCH_FLAGS)
         .putExtra(EXTRA_LAUNCH_REASON, reason)
-
-    private val VirtualDisplayNameMarkers = listOf(
-        "virtual",
-        "overlay",
-        "screen record",
-        "screenrecord",
-        "screen share",
-        "screenshare",
-        "mirroring",
-    )
 }
+
+private val VirtualDisplayNameMarkers = listOf(
+    "virtual",
+    "overlay",
+    "screen record",
+    "screenrecord",
+    "screen share",
+    "screenshare",
+    "mirroring",
+)
 
 internal fun Int.toHexFlags(): String = String.format(Locale.US, "0x%08X", this)

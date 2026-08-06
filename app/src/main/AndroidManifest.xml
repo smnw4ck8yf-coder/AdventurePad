@@ -21,6 +21,19 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AdventurePad">
+        <activity
+            android:name=".LauncherRoutingActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
         <!-- A distinct affinity makes the trackpad an independently recoverable task. -->
         <activity
             android:name=".TrackpadActivity"
@@ -37,13 +50,7 @@
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:theme="@style/Theme.AdventurePad"
-            android:windowSoftInputMode="adjustResize">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:windowSoftInputMode="adjustResize" />
     </application>
 
 </manifest>

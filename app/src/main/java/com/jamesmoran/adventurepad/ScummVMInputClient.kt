@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.Message
@@ -14,6 +15,7 @@ import android.util.Log
 import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
+import android.view.Surface
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -44,7 +46,31 @@ internal object ScummVMInputClient {
     private var remoteMessenger: Messenger? = null
     private var lastConnectionEvent = "IDLE"
     private var connectionStateListener: ((ScummVMConnectionDiagnostics) -> Unit)? = null
+    private var mirrorStatusListener: ((MirrorOutputStatus) -> Unit)? = null
+    private var mirrorStatus = MirrorOutputStatus()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val replyMessenger = Messenger(object : Handler(Looper.getMainLooper()) {
+        override fun handleMessage(message: Message) {
+            if (message.what != MirrorSurfaceProtocol.MSG_STATUS) {
+                Log.w(TAG, "Ignored unknown ScummVM reply type ${message.what}")
+                return
+            }
+            val data = message.data
+            val generation = data.getLong(MirrorSurfaceProtocol.KEY_GENERATION, 0)
+            if (generation < mirrorStatus.generation) {
+                Log.i(TAG, "Ignored stale mirror status for generation $generation")
+                return
+            }
+            mirrorStatus = MirrorOutputStatus(
+                state = MirrorOutputState.fromWireValue(
+                    data.getInt(MirrorSurfaceProtocol.KEY_STATUS, MirrorSurfaceProtocol.STATUS_FAILED),
+                ),
+                generation = generation,
+                diagnostic = data.getString(MirrorSurfaceProtocol.KEY_DIAGNOSTIC).orEmpty(),
+            )
+            mirrorStatusListener?.invoke(mirrorStatus)
+        }
+    })
     private val lastJoystickPositions = mutableMapOf<JoystickAxisKey, Int>()
     private val loggedGamepadDevices = mutableSetOf<Int>()
     private val loggedJoystickAxes = mutableSetOf<JoystickAxisKey>()
@@ -141,6 +167,12 @@ internal object ScummVMInputClient {
     }
 
     @Synchronized
+    fun setMirrorStatusListener(listener: ((MirrorOutputStatus) -> Unit)?) {
+        mirrorStatusListener = listener
+        listener?.invoke(mirrorStatus)
+    }
+
+    @Synchronized
     fun unbind() {
         mainHandler.removeCallbacks(reconnectRunnable)
         mainHandler.removeCallbacks(connectionTimeoutRunnable)
@@ -158,7 +190,55 @@ internal object ScummVMInputClient {
         bindingTracker.stop()
         applicationContext = null
         lastConnectionEvent = "UNBOUND"
+        mirrorStatus = MirrorOutputStatus(
+            state = MirrorOutputState.DETACHED,
+            generation = mirrorStatus.generation,
+            diagnostic = "Messenger disconnected.",
+        )
         notifyConnectionState()
+        mirrorStatusListener?.invoke(mirrorStatus)
+    }
+
+    fun attachMirrorSurface(
+        surface: Surface,
+        generation: Long,
+        width: Int,
+        height: Int,
+        displayId: Int,
+    ): Boolean {
+        if (!surface.isValid || generation <= 0 || width <= 0 || height <= 0) return false
+        val data = Bundle().apply {
+            putParcelable(MirrorSurfaceProtocol.KEY_SURFACE, surface)
+            putLong(MirrorSurfaceProtocol.KEY_GENERATION, generation)
+            putInt(MirrorSurfaceProtocol.KEY_WIDTH, width)
+            putInt(MirrorSurfaceProtocol.KEY_HEIGHT, height)
+            putInt(MirrorSurfaceProtocol.KEY_DISPLAY_ID, displayId)
+        }
+        return sendMirrorMessage(MirrorSurfaceProtocol.MSG_ATTACH_SURFACE, data)
+    }
+
+    fun detachMirrorSurface(generation: Long): Boolean {
+        if (generation <= 0) return false
+        val data = Bundle().apply {
+            putLong(MirrorSurfaceProtocol.KEY_GENERATION, generation)
+        }
+        return sendMirrorMessage(MirrorSurfaceProtocol.MSG_DETACH_SURFACE, data)
+    }
+
+    private fun sendMirrorMessage(messageType: Int, data: Bundle): Boolean {
+        val messenger = remoteMessenger ?: return false
+        val message = Message.obtain(null, messageType).apply {
+            this.data = data
+            replyTo = replyMessenger
+        }
+        return try {
+            messenger.send(message)
+            true
+        } catch (exception: RemoteException) {
+            handleConnectionLoss("MIRROR SEND FAILED", replaceBinding = true)
+            Log.w(TAG, "Mirror surface message failed; reconnect scheduled", exception)
+            false
+        }
     }
 
     fun sendRelativeDelta(dx: Float, dy: Float) {
