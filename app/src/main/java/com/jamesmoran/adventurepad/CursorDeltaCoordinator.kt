@@ -18,6 +18,7 @@ internal object CursorDeltaCoordinator {
     fun publish(dx: Float, dy: Float) {
         if (!dx.isFinite() || !dy.isFinite()) return
         val update = CursorDelta(dx = dx, dy = dy)
+        ScummVMInputClient.sendRelativeDelta(dx, dy)
         subscribers.forEach { subscriber -> subscriber(update) }
     }
 

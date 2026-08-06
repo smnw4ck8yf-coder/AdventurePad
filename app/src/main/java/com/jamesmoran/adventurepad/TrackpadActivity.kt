@@ -3,6 +3,10 @@ package com.jamesmoran.adventurepad
 import android.content.Intent
 import android.hardware.display.DisplayManager
 import android.os.Bundle
+import android.view.InputDevice
+import android.view.KeyEvent
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.util.Log
 import android.view.Display
 import androidx.activity.ComponentActivity
@@ -32,11 +36,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,6 +54,9 @@ class TrackpadActivity : ComponentActivity() {
     private var lastLaunchResult by mutableStateOf("Waiting for launch details.")
     private var receivedIntentFlags by mutableStateOf(0)
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
+    private var controllerLeftButtonDown = false
+    private var controllerRightButtonDown = false
+    private val forwardedGamepadKeysDown = mutableSetOf<Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -75,6 +84,7 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        ScummVMInputClient.bind(this)
         recordLifecycle("STARTED")
     }
 
@@ -90,7 +100,40 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onStop() {
         recordLifecycle("STOPPED")
+        releaseControllerButtons()
+        releaseForwardedGamepadKeys()
+        ScummVMInputClient.releaseJoystickAxes()
+        ScummVMInputClient.unbind()
         super.onStop()
+    }
+
+    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) &&
+            event.actionMasked == MotionEvent.ACTION_MOVE &&
+            ScummVMInputClient.sendJoystickMotion(event)
+        ) {
+            return true
+        }
+        return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val mouseButton = when {
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_A -> ScummVMMouseButton.LEFT
+            event.keyCode == KeyEvent.KEYCODE_BUTTON_B -> ScummVMMouseButton.RIGHT
+            event.keyCode == KeyEvent.KEYCODE_BACK && event.isFromGameController() -> {
+                ScummVMMouseButton.RIGHT
+            }
+            else -> null
+        }
+
+        if (mouseButton != null && forwardMouseButton(event, mouseButton)) {
+            return true
+        }
+        if (event.isFromGameController() && forwardGamepadKey(event)) {
+            return true
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     override fun onDestroy() {
@@ -111,6 +154,102 @@ class TrackpadActivity : ComponentActivity() {
     private fun restoreBothScreens() {
         lastLaunchResult = "Restore in progress…"
         lastLaunchResult = DualDisplayCoordinator.restoreBoth(this).message
+    }
+
+    private fun markControllerButtonDown(button: ScummVMMouseButton): Boolean = when (button) {
+        ScummVMMouseButton.LEFT -> (!controllerLeftButtonDown).also {
+            controllerLeftButtonDown = true
+        }
+        ScummVMMouseButton.RIGHT -> (!controllerRightButtonDown).also {
+            controllerRightButtonDown = true
+        }
+    }
+
+    private fun markControllerButtonUp(button: ScummVMMouseButton): Boolean = when (button) {
+        ScummVMMouseButton.LEFT -> controllerLeftButtonDown.also {
+            controllerLeftButtonDown = false
+        }
+        ScummVMMouseButton.RIGHT -> controllerRightButtonDown.also {
+            controllerRightButtonDown = false
+        }
+    }
+
+    private fun releaseControllerButtons() {
+        if (markControllerButtonUp(ScummVMMouseButton.LEFT)) {
+            ScummVMInputClient.sendButtonEvent(ScummVMButtonEvent.LEFT_BUTTON_UP)
+        }
+        if (markControllerButtonUp(ScummVMMouseButton.RIGHT)) {
+            ScummVMInputClient.sendButtonEvent(ScummVMButtonEvent.RIGHT_BUTTON_UP)
+        }
+    }
+
+    private fun forwardMouseButton(event: KeyEvent, button: ScummVMMouseButton): Boolean {
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (isControllerButtonDown(button)) {
+                    true
+                } else if (event.repeatCount == 0 &&
+                    ScummVMInputClient.sendButtonEvent(button.downEvent)
+                ) {
+                    markControllerButtonDown(button)
+                    Log.i(AdventurePadBridgeTag, "Button consumed: ${button.name} DOWN")
+                    true
+                } else {
+                    false
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (!isControllerButtonDown(button)) {
+                    false
+                } else {
+                    markControllerButtonUp(button)
+                    ScummVMInputClient.sendButtonEvent(button.upEvent)
+                    Log.i(AdventurePadBridgeTag, "Button consumed: ${button.name} UP")
+                    true
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun forwardGamepadKey(event: KeyEvent): Boolean {
+        if (!ScummVMInputClient.isForwardedGamepadKey(event.keyCode)) return false
+
+        return when (event.action) {
+            KeyEvent.ACTION_DOWN -> {
+                if (event.keyCode in forwardedGamepadKeysDown) {
+                    true
+                } else if (event.repeatCount == 0 &&
+                    ScummVMInputClient.sendGamepadKeyEvent(event.action, event.keyCode)
+                ) {
+                    forwardedGamepadKeysDown += event.keyCode
+                    true
+                } else {
+                    false
+                }
+            }
+            KeyEvent.ACTION_UP -> {
+                if (!forwardedGamepadKeysDown.remove(event.keyCode)) {
+                    false
+                } else {
+                    ScummVMInputClient.sendGamepadKeyEvent(event.action, event.keyCode)
+                    true
+                }
+            }
+            else -> false
+        }
+    }
+
+    private fun releaseForwardedGamepadKeys() {
+        forwardedGamepadKeysDown.forEach { keyCode ->
+            ScummVMInputClient.sendGamepadKeyEvent(KeyEvent.ACTION_UP, keyCode)
+        }
+        forwardedGamepadKeysDown.clear()
+    }
+
+    private fun isControllerButtonDown(button: ScummVMMouseButton): Boolean = when (button) {
+        ScummVMMouseButton.LEFT -> controllerLeftButtonDown
+        ScummVMMouseButton.RIGHT -> controllerRightButtonDown
     }
 
     private fun runtimeDiagnostics() = ActivityRuntimeDiagnostics(
@@ -225,6 +364,7 @@ private fun TouchSurface(
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
+    val viewConfiguration = LocalViewConfiguration.current
 
     Box(
         modifier = modifier
@@ -235,6 +375,20 @@ private fun TouchSurface(
                     surfaceWidth = surfaceSize.width.toFloat(),
                     surfaceHeight = surfaceSize.height.toFloat(),
                 )
+            }
+            .pointerInput(viewConfiguration.touchSlop) {
+                val tapTracker = SingleFingerTapTracker(
+                    maximumDurationMillis = ViewConfiguration.getTapTimeout().toLong(),
+                    maximumDistance = viewConfiguration.touchSlop,
+                )
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        if (tapTracker.handle(event)) {
+                            ScummVMInputClient.sendTapLeftClick()
+                        }
+                    }
+                }
             }
             // This simulated cursor remains app-local; this milestone performs no system injection.
             .pointerInput(Unit) {
@@ -287,6 +441,71 @@ private fun TouchSurface(
         )
     }
 }
+
+private class SingleFingerTapTracker(
+    private val maximumDurationMillis: Long,
+    maximumDistance: Float,
+) {
+    private val maximumDistanceSquared = maximumDistance * maximumDistance
+    private var trackedPointerId: PointerId? = null
+    private var initialPosition = Offset.Zero
+    private var downUptimeMillis = 0L
+    private var eligible = false
+
+    fun handle(event: PointerEvent): Boolean {
+        val pressedCount = event.changes.count { it.pressed }
+        when (event.type) {
+            PointerEventType.Press -> {
+                if (trackedPointerId == null && pressedCount == 1) {
+                    val pointer = event.changes.first { it.pressed }
+                    trackedPointerId = pointer.id
+                    initialPosition = pointer.position
+                    downUptimeMillis = pointer.uptimeMillis
+                    eligible = true
+                } else {
+                    eligible = false
+                }
+            }
+
+            PointerEventType.Move -> {
+                val pointer = event.findPointer(trackedPointerId)
+                if (pressedCount != 1 || pointer == null ||
+                    (pointer.position - initialPosition).getDistanceSquared() > maximumDistanceSquared
+                ) {
+                    eligible = false
+                }
+            }
+
+            PointerEventType.Release -> {
+                val releasedPointer = event.changes.firstOrNull {
+                    it.id == trackedPointerId && it.previousPressed && !it.pressed
+                }
+                if (releasedPointer != null && pressedCount == 0) {
+                    val duration = releasedPointer.uptimeMillis - downUptimeMillis
+                    val distanceSquared =
+                        (releasedPointer.position - initialPosition).getDistanceSquared()
+                    val recognised = eligible && duration in 0..maximumDurationMillis &&
+                        distanceSquared <= maximumDistanceSquared
+                    reset()
+                    return recognised
+                }
+                if (pressedCount == 0) reset()
+            }
+
+            PointerEventType.Unknown -> if (pressedCount == 0) reset()
+        }
+        return false
+    }
+
+    private fun reset() {
+        trackedPointerId = null
+        eligible = false
+        downUptimeMillis = 0L
+    }
+}
+
+private fun KeyEvent.isFromGameController(): Boolean =
+    isFromSource(InputDevice.SOURCE_GAMEPAD) || isFromSource(InputDevice.SOURCE_JOYSTICK)
 
 private fun handlePointerEvent(
     event: PointerEvent,
@@ -626,3 +845,4 @@ private val MarkerColor = Color(0xFF00E5FF)
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private const val MaxMoveEventCount = 999_999
+private const val AdventurePadBridgeTag = "AdventurePadBridge"
