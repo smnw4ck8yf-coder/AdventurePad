@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.os.Message
 import android.os.Messenger
 import android.os.RemoteException
@@ -14,6 +16,13 @@ import android.view.KeyEvent
 import android.view.MotionEvent
 import kotlin.math.abs
 import kotlin.math.roundToInt
+
+internal data class ScummVMConnectionDiagnostics(
+    val isConnected: Boolean = false,
+    val bindingRequested: Boolean = false,
+    val reconnectAttemptCount: Int = 0,
+    val lastConnectionEvent: String = "IDLE",
+)
 
 /** Explicit, lifecycle-bound Messenger connection to the custom ScummVM debug app. */
 internal object ScummVMInputClient {
@@ -27,75 +36,116 @@ internal object ScummVMInputClient {
     private const val ANDROID_JOYSTICK_DEAD_ZONE = 0.209f
     private const val JOYSTICK_HAT_SCALE = 0.66f
     private const val BRIDGE_TAG = "AdventurePadBridge"
+    private const val RECONNECT_DELAY_MILLIS = 2_000L
+    private const val CONNECTION_TIMEOUT_MILLIS = 5_000L
 
     private var applicationContext: Context? = null
-    private var bindingRequested = false
+    private val bindingTracker = BindingRequestTracker()
     private var remoteMessenger: Messenger? = null
-    private var connectionStateListener: ((Boolean) -> Unit)? = null
+    private var lastConnectionEvent = "IDLE"
+    private var connectionStateListener: ((ScummVMConnectionDiagnostics) -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val lastJoystickPositions = mutableMapOf<JoystickAxisKey, Int>()
     private val loggedGamepadDevices = mutableSetOf<Int>()
     private val loggedJoystickAxes = mutableSetOf<JoystickAxisKey>()
     private val connection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, service: IBinder) {
+            if (!bindingTracker.bindingDesired || !bindingTracker.bindingRequested) {
+                Log.w(TAG, "Ignoring stale Messenger connection callback for $name")
+                return
+            }
             remoteMessenger = Messenger(service)
+            lastConnectionEvent = "CONNECTED"
+            mainHandler.removeCallbacks(reconnectRunnable)
+            mainHandler.removeCallbacks(connectionTimeoutRunnable)
             notifyConnectionState()
             Log.i(TAG, "Messenger connected to $name")
         }
 
         override fun onServiceDisconnected(name: ComponentName) {
-            remoteMessenger = null
-            notifyConnectionState()
-            clearGamepadState()
+            handleConnectionLoss("SERVICE DISCONNECTED", replaceBinding = false)
             Log.w(TAG, "Messenger disconnected from $name")
         }
 
         override fun onBindingDied(name: ComponentName) {
-            remoteMessenger = null
-            notifyConnectionState()
-            clearGamepadState()
+            handleConnectionLoss("BINDING DIED", replaceBinding = true)
             Log.e(TAG, "Messenger binding died for $name")
         }
 
         override fun onNullBinding(name: ComponentName) {
-            remoteMessenger = null
-            notifyConnectionState()
-            clearGamepadState()
+            handleConnectionLoss("NULL BINDING", replaceBinding = true)
             Log.e(TAG, "ScummVM returned a null Messenger binding for $name")
         }
+    }
+    private val reconnectRunnable = Runnable {
+        if (remoteMessenger != null || !bindingTracker.beginReconnectAttempt()) return@Runnable
+        lastConnectionEvent = "RECONNECT ATTEMPT ${bindingTracker.reconnectAttemptCount}"
+        notifyConnectionState()
+        requestBinding()
+    }
+    private val connectionTimeoutRunnable = Runnable {
+        if (!bindingTracker.bindingDesired ||
+            !bindingTracker.bindingRequested ||
+            remoteMessenger != null
+        ) {
+            return@Runnable
+        }
+        lastConnectionEvent = "CONNECTION TIMEOUT"
+        abandonCurrentBinding()
+        notifyConnectionState()
+        scheduleReconnect()
     }
 
     @Synchronized
     fun bind(context: Context) {
-        if (bindingRequested) return
+        if (!bindingTracker.start()) return
+        applicationContext = context.applicationContext
+        lastConnectionEvent = "BIND REQUESTED"
+        notifyConnectionState()
+        requestBinding()
+    }
 
-        val appContext = context.applicationContext
+    @Synchronized
+    private fun requestBinding() {
+        if (!bindingTracker.canRequestBinding()) return
+        val appContext = applicationContext ?: return
         val intent = Intent().setComponent(ComponentName(SCUMMVM_PACKAGE, SCUMMVM_SERVICE))
-        applicationContext = appContext
-        bindingRequested = try {
+        val accepted = try {
             appContext.bindService(intent, connection, Context.BIND_AUTO_CREATE).also { bound ->
                 if (bound) {
+                    lastConnectionEvent = "WAITING FOR SERVICE"
                     Log.i(TAG, "Messenger bind requested for ${intent.component}")
                 } else {
+                    lastConnectionEvent = "BIND REJECTED"
                     Log.w(TAG, "Messenger bind was rejected for ${intent.component}")
-                    applicationContext = null
                 }
             }
         } catch (exception: RuntimeException) {
-            applicationContext = null
+            lastConnectionEvent = "BIND FAILED: ${exception.javaClass.simpleName}"
             Log.w(TAG, "Messenger bind failed; standalone mode remains available", exception)
             false
         }
+        bindingTracker.recordRequestResult(accepted)
+        notifyConnectionState()
+        if (bindingTracker.bindingRequested) {
+            scheduleConnectionTimeout()
+        } else {
+            scheduleReconnect()
+        }
     }
 
-    fun setConnectionStateListener(listener: ((Boolean) -> Unit)?) {
+    @Synchronized
+    fun setConnectionStateListener(listener: ((ScummVMConnectionDiagnostics) -> Unit)?) {
         connectionStateListener = listener
-        listener?.invoke(remoteMessenger != null)
+        listener?.invoke(connectionDiagnostics())
     }
 
     @Synchronized
     fun unbind() {
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.removeCallbacks(connectionTimeoutRunnable)
         val context = applicationContext
-        if (bindingRequested && context != null) {
+        if (bindingTracker.bindingRequested && context != null) {
             try {
                 context.unbindService(connection)
                 Log.i(TAG, "Messenger unbound")
@@ -104,10 +154,11 @@ internal object ScummVMInputClient {
             }
         }
         remoteMessenger = null
-        notifyConnectionState()
         clearGamepadState()
-        bindingRequested = false
+        bindingTracker.stop()
         applicationContext = null
+        lastConnectionEvent = "UNBOUND"
+        notifyConnectionState()
     }
 
     fun sendRelativeDelta(dx: Float, dy: Float) {
@@ -124,9 +175,8 @@ internal object ScummVMInputClient {
         try {
             messenger.send(message)
         } catch (exception: RemoteException) {
-            remoteMessenger = null
-            notifyConnectionState()
-            Log.w(TAG, "Messenger send failed; waiting for a future lifecycle rebind", exception)
+            handleConnectionLoss("MOVE SEND FAILED", replaceBinding = true)
+            Log.w(TAG, "Messenger send failed; reconnect scheduled", exception)
         }
     }
 
@@ -138,8 +188,7 @@ internal object ScummVMInputClient {
             Log.i(BRIDGE_TAG, "Button event forwarded: ${event.name}")
             true
         } catch (exception: RemoteException) {
-            remoteMessenger = null
-            notifyConnectionState()
+            handleConnectionLoss("BUTTON SEND FAILED", replaceBinding = true)
             Log.w(TAG, "Button event forwarding failed", exception)
             false
         }
@@ -181,9 +230,7 @@ internal object ScummVMInputClient {
                     )
                 }
             } catch (exception: RemoteException) {
-                remoteMessenger = null
-                notifyConnectionState()
-                clearGamepadState()
+                handleConnectionLoss("JOYSTICK SEND FAILED", replaceBinding = true)
                 Log.w(TAG, "Joystick forwarding failed", exception)
                 return false
             }
@@ -202,8 +249,7 @@ internal object ScummVMInputClient {
                 try {
                     messenger.send(message)
                 } catch (exception: RemoteException) {
-                    remoteMessenger = null
-                    notifyConnectionState()
+                    handleConnectionLoss("JOYSTICK RELEASE FAILED", replaceBinding = true)
                     Log.w(TAG, "Joystick release forwarding failed", exception)
                     return@forEach
                 }
@@ -230,9 +276,7 @@ internal object ScummVMInputClient {
             )
             true
         } catch (exception: RemoteException) {
-            remoteMessenger = null
-            notifyConnectionState()
-            clearGamepadState()
+            handleConnectionLoss("KEY SEND FAILED", replaceBinding = true)
             Log.w(TAG, "Gamepad key forwarding failed", exception)
             false
         }
@@ -240,8 +284,56 @@ internal object ScummVMInputClient {
 
     fun isForwardedGamepadKey(keyCode: Int): Boolean = keyCode in ForwardedGamepadKeyCodes
 
+    @Synchronized
+    private fun handleConnectionLoss(event: String, replaceBinding: Boolean) {
+        val wasConnected = remoteMessenger != null
+        remoteMessenger = null
+        clearGamepadState()
+        lastConnectionEvent = event
+        if (replaceBinding) abandonCurrentBinding()
+        if (wasConnected || replaceBinding) notifyConnectionState()
+        if (replaceBinding) scheduleReconnect() else scheduleConnectionTimeout()
+    }
+
+    private fun abandonCurrentBinding() {
+        mainHandler.removeCallbacks(connectionTimeoutRunnable)
+        val context = applicationContext
+        if (bindingTracker.bindingRequested && context != null) {
+            try {
+                context.unbindService(connection)
+            } catch (exception: RuntimeException) {
+                Log.w(TAG, "Failed to discard unusable Messenger binding", exception)
+            }
+        }
+        bindingTracker.discardBinding()
+    }
+
+    private fun scheduleConnectionTimeout() {
+        if (!bindingTracker.bindingDesired ||
+            !bindingTracker.bindingRequested ||
+            remoteMessenger != null
+        ) {
+            return
+        }
+        mainHandler.removeCallbacks(connectionTimeoutRunnable)
+        mainHandler.postDelayed(connectionTimeoutRunnable, CONNECTION_TIMEOUT_MILLIS)
+    }
+
+    private fun scheduleReconnect() {
+        if (!bindingTracker.bindingDesired || remoteMessenger != null) return
+        mainHandler.removeCallbacks(reconnectRunnable)
+        mainHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY_MILLIS)
+    }
+
+    private fun connectionDiagnostics() = ScummVMConnectionDiagnostics(
+        isConnected = remoteMessenger != null,
+        bindingRequested = bindingTracker.bindingRequested,
+        reconnectAttemptCount = bindingTracker.reconnectAttemptCount,
+        lastConnectionEvent = lastConnectionEvent,
+    )
+
     private fun notifyConnectionState() {
-        connectionStateListener?.invoke(remoteMessenger != null)
+        connectionStateListener?.invoke(connectionDiagnostics())
     }
 
     private fun joystickMappingsFor(device: InputDevice): List<JoystickAxisMapping> {

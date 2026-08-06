@@ -60,6 +60,8 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
+import kotlin.math.sqrt
 
 class TrackpadActivity : ComponentActivity() {
     private var lifecycleEvent by mutableStateOf("INITIALIZING")
@@ -67,13 +69,15 @@ class TrackpadActivity : ComponentActivity() {
     private var receivedIntentFlags by mutableStateOf(0)
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
     private var mouseDiagnostics by mutableStateOf(MouseDiagnostics())
-    private var isScummVMConnected by mutableStateOf(false)
+    private var connectionDiagnostics by mutableStateOf(ScummVMConnectionDiagnostics())
     private var gestureResetGeneration by mutableStateOf(0)
     private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
         mutableSetOf<MouseButtonSource>()
     }
     private val mainHandler = Handler(Looper.getMainLooper())
     private val forwardedGamepadKeysDown = mutableSetOf<Int>()
+    private val rawTouchDiagnostics = RawTouchDiagnostics()
+    private val touchProvenance = TrackpadTouchProvenance()
     private val tapLeftButtonRelease = Runnable {
         releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
     }
@@ -86,6 +90,8 @@ class TrackpadActivity : ComponentActivity() {
             ?.let { "Launched because: $it" }
             ?: "TrackpadActivity created without a launch reason."
         recordLifecycle("CREATED")
+        touchProvenance.reset(gestureResetGeneration)
+        rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
         enableEdgeToEdge()
 
         setContent {
@@ -93,8 +99,9 @@ class TrackpadActivity : ComponentActivity() {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
                     displayId = currentDisplayId,
-                    isScummVMConnected = isScummVMConnected,
+                    connectionDiagnostics = connectionDiagnostics,
                     gestureResetGeneration = gestureResetGeneration,
+                    touchProvenance = touchProvenance,
                     onGesture = ::handleTrackpadGesture,
                     onGestureDiagnostic = ::recordGestureDiagnostic,
                     onButtonDown = ::pressDedicatedButton,
@@ -107,8 +114,11 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        ScummVMInputClient.setConnectionStateListener { isConnected ->
-            isScummVMConnected = isConnected
+        ScummVMInputClient.setConnectionStateListener { updatedDiagnostics ->
+            val connectionWasLost = connectionDiagnostics.isConnected &&
+                !updatedDiagnostics.isConnected
+            connectionDiagnostics = updatedDiagnostics
+            if (connectionWasLost) discardLocalInputState("CONNECTION LOSS")
         }
         ScummVMInputClient.bind(this)
         recordLifecycle("STARTED")
@@ -121,6 +131,8 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onPause() {
         releaseAllMouseButtons("PAUSE")
+        releaseForwardedGamepadKeys()
+        ScummVMInputClient.releaseJoystickAxes()
         recordLifecycle("PAUSED")
         super.onPause()
     }
@@ -143,6 +155,35 @@ class TrackpadActivity : ComponentActivity() {
             return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> touchProvenance.recordPlatformDown(
+                generation = gestureResetGeneration,
+                downTimeMillis = event.downTime,
+                pointerId = event.getPointerId(event.actionIndex),
+            )
+            MotionEvent.ACTION_POINTER_DOWN -> touchProvenance.recordAdditionalPointer(
+                generation = gestureResetGeneration,
+                downTimeMillis = event.downTime,
+            )
+            MotionEvent.ACTION_UP -> touchProvenance.recordPlatformUp(
+                generation = gestureResetGeneration,
+                downTimeMillis = event.downTime,
+                pointerId = event.getPointerId(event.actionIndex),
+            )
+            MotionEvent.ACTION_CANCEL -> touchProvenance.recordPlatformCancel(
+                generation = gestureResetGeneration,
+                downTimeMillis = event.downTime,
+            )
+        }
+        rawTouchDiagnostics.recordPlatformEvent(
+            event = event,
+            resetGeneration = gestureResetGeneration,
+            touchSlop = ViewConfiguration.get(this).scaledTouchSlop.toFloat(),
+        )
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -184,6 +225,9 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        releaseAllMouseButtons("NEW INTENT")
+        releaseForwardedGamepadKeys()
+        ScummVMInputClient.releaseJoystickAxes()
         setIntent(intent)
         receivedIntentFlags = intent.flags
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
@@ -349,8 +393,7 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun releaseAllMouseButtons(reason: String) {
-        gestureResetGeneration++
-        recordGestureDiagnostic("GESTURE CANCELLED: $reason")
+        resetGestureRecognition(reason)
         mainHandler.removeCallbacks(tapLeftButtonRelease)
         ScummVMMouseButton.entries.forEach { button ->
             val sources = mouseButtonSources.getValue(button)
@@ -361,6 +404,27 @@ class TrackpadActivity : ComponentActivity() {
             }
         }
         updateDragDiagnostics()
+    }
+
+    private fun discardLocalInputState(reason: String) {
+        resetGestureRecognition(reason)
+        mainHandler.removeCallbacks(tapLeftButtonRelease)
+        forwardedGamepadKeysDown.clear()
+        ScummVMMouseButton.entries.forEach { button ->
+            val sources = mouseButtonSources.getValue(button)
+            if (sources.isNotEmpty()) {
+                sources.clear()
+                updateMouseDiagnostics(button, isDown = false, reason = reason)
+            }
+        }
+        updateDragDiagnostics()
+    }
+
+    private fun resetGestureRecognition(reason: String) {
+        gestureResetGeneration++
+        touchProvenance.reset(gestureResetGeneration)
+        rawTouchDiagnostics.reset(gestureResetGeneration, reason)
+        recordGestureDiagnostic("GESTURE CANCELLED: $reason")
     }
 
     private fun isMouseButtonSourceDown(
@@ -396,6 +460,12 @@ class TrackpadActivity : ComponentActivity() {
         mouseDiagnostics = mouseDiagnostics.copy(
             dragSource = dragSource,
             dragActive = dragSource != DragSource.NONE,
+            activeMouseButtonSources = ScummVMMouseButton.entries.joinToString("; ") { button ->
+                val sources = mouseButtonSources.getValue(button)
+                    .joinToString("+") { it.diagnosticLabel }
+                    .ifEmpty { "NONE" }
+                "${button.name}: $sources"
+            },
         )
     }
 
@@ -428,8 +498,9 @@ class TrackpadActivity : ComponentActivity() {
 private fun AdventurePadScreen(
     mouseDiagnostics: MouseDiagnostics,
     displayId: Int,
-    isScummVMConnected: Boolean,
+    connectionDiagnostics: ScummVMConnectionDiagnostics,
     gestureResetGeneration: Int,
+    touchProvenance: TrackpadTouchProvenance,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
@@ -447,7 +518,7 @@ private fun AdventurePadScreen(
             .padding(horizontal = 12.dp, vertical = 6.dp),
     ) {
         CompactActivityHeader(
-            isScummVMConnected = isScummVMConnected,
+            isScummVMConnected = connectionDiagnostics.isConnected,
             diagnosticsVisible = diagnosticsVisible,
             onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
             onRestoreBothScreens = onRestoreBothScreens,
@@ -456,6 +527,7 @@ private fun AdventurePadScreen(
         TouchSurface(
             touchState = touchState,
             gestureResetGeneration = gestureResetGeneration,
+            touchProvenance = touchProvenance,
             onGesture = onGesture,
             onGestureDiagnostic = onGestureDiagnostic,
             modifier = Modifier
@@ -468,7 +540,7 @@ private fun AdventurePadScreen(
             MouseDiagnosticsPanel(
                 diagnostics = mouseDiagnostics,
                 displayId = displayId,
-                isScummVMConnected = isScummVMConnected,
+                connectionDiagnostics = connectionDiagnostics,
             )
         }
 
@@ -548,6 +620,7 @@ private fun ConnectionIndicator(isConnected: Boolean) {
 private fun TouchSurface(
     touchState: MutableState<TouchState>,
     gestureResetGeneration: Int,
+    touchProvenance: TrackpadTouchProvenance,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -571,6 +644,14 @@ private fun TouchSurface(
                 androidViewConfiguration.scaledDoubleTapSlop,
                 gestureResetGeneration,
             ) {
+                touchState.value = touchState.value.withTransientInputCleared()
+                onGestureDiagnostic(
+                    "LIFECYCLE GESTURE RESET APPLIED: GENERATION $gestureResetGeneration",
+                )
+                Log.i(
+                    RAW_TOUCH_TAG,
+                    "COMPOSE POINTER INPUT STARTED generation=$gestureResetGeneration",
+                )
                 coroutineScope {
                     val holdTimeoutMillis = ViewConfiguration.getLongPressTimeout().toLong()
                     val gestureTracker = TrackpadGestureTracker(
@@ -581,26 +662,103 @@ private fun TouchSurface(
                         touchSlop = viewConfiguration.touchSlop,
                         doubleTapSlop = androidViewConfiguration.scaledDoubleTapSlop.toFloat(),
                     )
+                    val composeTouchDiagnostics = ComposeTouchDiagnostics(
+                        resetGeneration = gestureResetGeneration,
+                        touchSlop = viewConfiguration.touchSlop,
+                    )
                     var holdJob: Job? = null
+                    var activeSequenceToken: TouchSequenceToken? = null
                     val pointerInputScope = this
                     try {
                         awaitPointerEventScope {
                             while (true) {
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
-                                val gestureUpdate = gestureTracker.handle(event)
+                                composeTouchDiagnostics.record(event)
+                                val motionEvent = event.motionEvent
+                                val pressedCount = event.changes.count { it.pressed }
+                                if (event.type == PointerEventType.Press && pressedCount == 1) {
+                                    val pointer = event.changes.first { it.pressed }
+                                    activeSequenceToken = touchProvenance.claimComposeDown(
+                                        generation = gestureResetGeneration,
+                                        downTimeMillis = motionEvent?.downTime,
+                                        pointerId = motionEvent?.let {
+                                            it.getPointerId(it.actionIndex)
+                                        } ?: pointer.id.value.toInt(),
+                                    )
+                                }
+                                val invalidSequenceDown =
+                                    event.type == PointerEventType.Press &&
+                                        pressedCount == 1 &&
+                                        activeSequenceToken == null
+                                val terminalRelease = event.type == PointerEventType.Release &&
+                                    pressedCount == 0
+                                val platformCancel =
+                                    motionEvent?.actionMasked == MotionEvent.ACTION_CANCEL
+                                val provenanceTerminal = terminalRelease || platformCancel
+                                val releaseVerdict = if (provenanceTerminal) {
+                                    touchProvenance.validateComposeRelease(
+                                        token = activeSequenceToken,
+                                        generation = gestureResetGeneration,
+                                        composeBackedByPlatformUp =
+                                            motionEvent?.actionMasked == MotionEvent.ACTION_UP,
+                                        composeDownTimeMillis = motionEvent?.downTime,
+                                        composePointerId = motionEvent?.takeIf {
+                                            it.actionMasked == MotionEvent.ACTION_UP
+                                        }?.let { it.getPointerId(it.actionIndex) },
+                                        allowAdditionalPointers =
+                                            gestureTracker.isTwoFingerGesturePending(),
+                                    )
+                                } else {
+                                    null
+                                }
+                                val gestureUpdate = if (invalidSequenceDown) {
+                                    gestureTracker.invalidateFromProvenance(
+                                        TouchReleaseVerdict.rejected(
+                                            sequenceId = null,
+                                            generation = gestureResetGeneration,
+                                            reason = TapRejectionReason
+                                                .NO_GENUINE_PLATFORM_ACTION_DOWN,
+                                        ),
+                                    )
+                                } else if (platformCancel) {
+                                    gestureTracker.invalidateFromProvenance(
+                                        checkNotNull(releaseVerdict),
+                                    )
+                                } else {
+                                    gestureTracker.handle(event, releaseVerdict)
+                                }
                                 if (gestureUpdate.cancelHold) {
+                                    val timerWasPending = holdJob != null
                                     holdJob?.cancel()
                                     holdJob = null
+                                    if (timerWasPending) {
+                                        onGestureDiagnostic("PENDING HOLD TIMER CANCELLED")
+                                    }
                                 }
                                 if (gestureUpdate.scheduleHold) {
                                     holdJob?.cancel()
+                                    val scheduledToken = activeSequenceToken
                                     holdJob = pointerInputScope.launch {
                                         delay(holdTimeoutMillis)
-                                        gestureTracker.handleHoldTimeout()?.let(onGesture)
+                                        holdJob = null
+                                        if (touchProvenance.isLive(
+                                                scheduledToken,
+                                                gestureResetGeneration,
+                                            )
+                                        ) {
+                                            gestureTracker.handleHoldTimeout()?.let(onGesture)
+                                        }
                                     }
                                 }
                                 gestureUpdate.diagnostics.forEach(onGestureDiagnostic)
                                 gestureUpdate.gesture?.let(onGesture)
+                                if (provenanceTerminal) {
+                                    touchProvenance.complete(
+                                        activeSequenceToken,
+                                        gestureResetGeneration,
+                                    )
+                                    activeSequenceToken = null
+                                }
                                 val nextState = handlePointerEvent(
                                     event = event,
                                     previousState = touchState.value,
@@ -615,8 +773,43 @@ private fun TouchSurface(
                             }
                         }
                     } finally {
+                        touchProvenance.invalidateCoroutine(
+                            activeSequenceToken,
+                            gestureResetGeneration,
+                        )
+                        val coroutineCancellationUpdate = activeSequenceToken?.let { token ->
+                            val verdict = touchProvenance.validateComposeRelease(
+                                token = token,
+                                generation = gestureResetGeneration,
+                                composeBackedByPlatformUp = false,
+                                composeDownTimeMillis = null,
+                                composePointerId = null,
+                                allowAdditionalPointers = false,
+                            )
+                            gestureTracker.invalidateFromProvenance(verdict)
+                        }
+                        composeTouchDiagnostics.recordCoroutineCancellation()
+                        Log.i(
+                            RAW_TOUCH_TAG,
+                            "COMPOSE POINTER INPUT CANCELLED/RESTARTED " +
+                                "generation=$gestureResetGeneration",
+                        )
+                        val timerWasPending = holdJob != null
                         holdJob?.cancel()
-                        gestureTracker.cancelActiveGesture()?.let(onGesture)
+                        holdJob = null
+                        if (timerWasPending) {
+                            onGestureDiagnostic("PENDING HOLD TIMER CANCELLED: LIFECYCLE RESET")
+                        }
+                        coroutineCancellationUpdate?.diagnostics?.forEach(onGestureDiagnostic)
+                        if (coroutineCancellationUpdate != null) {
+                            coroutineCancellationUpdate.gesture?.let(onGesture)
+                            touchProvenance.complete(
+                                activeSequenceToken,
+                                gestureResetGeneration,
+                            )
+                        } else {
+                            gestureTracker.cancelActiveGesture()?.let(onGesture)
+                        }
                     }
                 }
             },
@@ -648,7 +841,463 @@ private fun TouchSurface(
     }
 }
 
-private class TrackpadGestureTracker(
+private class RawTouchDiagnostics {
+    private var sequenceIndex = 0
+    private var activeSequence: Int? = null
+    private var trackedPointerId = MotionEvent.INVALID_POINTER_ID
+    private var initialX = 0f
+    private var initialY = 0f
+    private var maximumDisplacement = 0f
+    private var firstMoveLogged = false
+    private var slopCrossingLogged = false
+    private var startedWithoutDown = false
+
+    fun reset(resetGeneration: Int, reason: String) {
+        sequenceIndex = 0
+        activeSequence = null
+        trackedPointerId = MotionEvent.INVALID_POINTER_ID
+        maximumDisplacement = 0f
+        firstMoveLogged = false
+        slopCrossingLogged = false
+        startedWithoutDown = false
+        Log.i(
+            RAW_TOUCH_TAG,
+            "PLATFORM DIAGNOSTICS RESET generation=$resetGeneration reason=$reason",
+        )
+    }
+
+    fun recordPlatformEvent(event: MotionEvent, resetGeneration: Int, touchSlop: Float) {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+            sequenceIndex++
+            activeSequence = sequenceIndex
+            trackedPointerId = event.getPointerId(event.actionIndex)
+            initialX = event.getX(event.actionIndex)
+            initialY = event.getY(event.actionIndex)
+            maximumDisplacement = 0f
+            firstMoveLogged = false
+            slopCrossingLogged = false
+            startedWithoutDown = false
+        } else if (activeSequence == null && sequenceIndex < RAW_SEQUENCE_LIMIT) {
+            sequenceIndex++
+            activeSequence = sequenceIndex
+            val fallbackIndex = event.actionIndex.takeIf { it in 0 until event.pointerCount } ?: 0
+            trackedPointerId = if (event.pointerCount > 0) {
+                event.getPointerId(fallbackIndex)
+            } else {
+                MotionEvent.INVALID_POINTER_ID
+            }
+            initialX = if (event.pointerCount > 0) event.getX(fallbackIndex) else 0f
+            initialY = if (event.pointerCount > 0) event.getY(fallbackIndex) else 0f
+            maximumDisplacement = 0f
+            firstMoveLogged = false
+            slopCrossingLogged = false
+            startedWithoutDown = true
+        }
+
+        val sequence = activeSequence ?: return
+        if (sequence > RAW_SEQUENCE_LIMIT) return
+
+        val pointerIndex = event.findPointerIndex(trackedPointerId)
+        val trackedX = pointerIndex.takeIf { it >= 0 }?.let(event::getX)
+        val trackedY = pointerIndex.takeIf { it >= 0 }?.let(event::getY)
+        val displacement = if (trackedX != null && trackedY != null) {
+            sqrt(
+                (trackedX - initialX) * (trackedX - initialX) +
+                    (trackedY - initialY) * (trackedY - initialY),
+            )
+        } else {
+            maximumDisplacement
+        }
+        maximumDisplacement = maxOf(maximumDisplacement, displacement)
+        val crossedSlop = maximumDisplacement > touchSlop
+        val shouldLog = event.actionMasked != MotionEvent.ACTION_MOVE ||
+            !firstMoveLogged ||
+            (crossedSlop && !slopCrossingLogged)
+        if (shouldLog) {
+            Log.i(
+                RAW_TOUCH_TAG,
+                "PLATFORM sequence=$sequence generation=$resetGeneration " +
+                    "startedWithoutDown=$startedWithoutDown " +
+                    event.describeRawTouch(
+                        trackedPointerId = trackedPointerId,
+                        displacement = maximumDisplacement,
+                        origin = "GENUINE_PLATFORM_DISPATCH",
+                    ),
+            )
+        }
+        if (event.actionMasked == MotionEvent.ACTION_MOVE) firstMoveLogged = true
+        if (crossedSlop) slopCrossingLogged = true
+
+        if (event.actionMasked == MotionEvent.ACTION_UP ||
+            event.actionMasked == MotionEvent.ACTION_CANCEL
+        ) {
+            Log.i(
+                RAW_TOUCH_TAG,
+                "PLATFORM sequence=$sequence terminal=${MotionEvent.actionToString(event.action)} " +
+                    "duration=${event.eventTime - event.downTime}ms " +
+                    "totalDisplacement=${String.format(Locale.US, "%.2f", maximumDisplacement)} " +
+                    "genuinePlatformEvent=true generation=$resetGeneration",
+            )
+            activeSequence = null
+        }
+    }
+}
+
+private class ComposeTouchDiagnostics(
+    private val resetGeneration: Int,
+    private val touchSlop: Float,
+) {
+    private var sequenceIndex = 0
+    private var activeSequence: Int? = null
+    private var trackedPointerId: PointerId? = null
+    private var initialPosition: Offset? = null
+    private var maximumDisplacement = 0f
+    private var firstMoveLogged = false
+    private var slopCrossingLogged = false
+    private var platformUpSeen = false
+    private var startedWithoutDown = false
+
+    fun record(event: PointerEvent) {
+        val motionEvent = event.motionEvent
+        val isSequenceDown = motionEvent?.actionMasked == MotionEvent.ACTION_DOWN ||
+            (motionEvent == null && event.type == PointerEventType.Press && activeSequence == null)
+        if (isSequenceDown) {
+            sequenceIndex++
+            activeSequence = sequenceIndex
+            val change = event.changes.firstOrNull { it.pressed } ?: event.changes.firstOrNull()
+            trackedPointerId = change?.id
+            initialPosition = change?.position
+            maximumDisplacement = 0f
+            firstMoveLogged = false
+            slopCrossingLogged = false
+            platformUpSeen = false
+            startedWithoutDown = false
+        } else if (activeSequence == null && sequenceIndex < RAW_SEQUENCE_LIMIT) {
+            sequenceIndex++
+            activeSequence = sequenceIndex
+            val change = event.changes.firstOrNull { it.pressed } ?: event.changes.firstOrNull()
+            trackedPointerId = change?.id
+            initialPosition = change?.position
+            maximumDisplacement = 0f
+            firstMoveLogged = false
+            slopCrossingLogged = false
+            platformUpSeen = false
+            startedWithoutDown = true
+        }
+
+        val sequence = activeSequence ?: return
+        if (sequence > RAW_SEQUENCE_LIMIT) return
+        val trackedChange = trackedPointerId?.let { id ->
+            event.changes.firstOrNull { it.id == id }
+        }
+        val start = initialPosition
+        if (trackedChange != null && start != null) {
+            maximumDisplacement = maxOf(
+                maximumDisplacement,
+                sqrt((trackedChange.position - start).getDistanceSquared()),
+            )
+        }
+        val crossedSlop = maximumDisplacement > touchSlop
+        val isMove = motionEvent?.actionMasked == MotionEvent.ACTION_MOVE ||
+            (motionEvent == null && event.type == PointerEventType.Move)
+        val shouldLog = !isMove || !firstMoveLogged || (crossedSlop && !slopCrossingLogged)
+        if (shouldLog) {
+            val origin = if (motionEvent == null) "COMPOSE_FABRICATED" else "PLATFORM_BACKED"
+            val details = motionEvent?.describeRawTouch(
+                trackedPointerId = trackedPointerId?.value?.toInt()
+                    ?: MotionEvent.INVALID_POINTER_ID,
+                displacement = maximumDisplacement,
+                origin = origin,
+            ) ?: "action=${event.type} actionIndex=NA pointerCount=${event.changes.size} " +
+                "pointerIds=${event.changes.joinToString(prefix = "[", postfix = "]") { it.id.value.toString() }} " +
+                "downTime=NA eventTime=${event.changes.maxOfOrNull { it.uptimeMillis } ?: -1L} " +
+                "elapsed=NA trackedPointerId=${trackedPointerId?.value ?: "NONE"} " +
+                "x=${trackedChange?.position?.x ?: "NA"} y=${trackedChange?.position?.y ?: "NA"} " +
+                "deviceId=NA source=NA toolType=${trackedChange?.type ?: "NA"} " +
+                "displacement=${String.format(Locale.US, "%.2f", maximumDisplacement)} " +
+                "origin=$origin"
+            Log.i(
+                RAW_TOUCH_TAG,
+                "COMPOSE sequence=$sequence generation=$resetGeneration " +
+                    "startedWithoutDown=$startedWithoutDown $details",
+            )
+        }
+        if (isMove) firstMoveLogged = true
+        if (crossedSlop) slopCrossingLogged = true
+
+        val isTerminal = motionEvent?.actionMasked == MotionEvent.ACTION_UP ||
+            motionEvent?.actionMasked == MotionEvent.ACTION_CANCEL ||
+            (motionEvent == null && event.type == PointerEventType.Release &&
+                event.changes.none { it.pressed })
+        if (isTerminal) {
+            platformUpSeen = motionEvent?.actionMasked == MotionEvent.ACTION_UP
+            Log.i(
+                RAW_TOUCH_TAG,
+                "COMPOSE sequence=$sequence terminal=${motionEvent?.let {
+                    MotionEvent.actionToString(it.action)
+                } ?: event.type.toString()} " +
+                    "duration=${motionEvent?.let { it.eventTime - it.downTime } ?: "NA"}ms " +
+                    "totalDisplacement=${String.format(Locale.US, "%.2f", maximumDisplacement)} " +
+                    "genuinePlatformUp=$platformUpSeen generation=$resetGeneration",
+            )
+            activeSequence = null
+        }
+    }
+
+    fun recordCoroutineCancellation() {
+        Log.i(
+            RAW_TOUCH_TAG,
+            "COMPOSE COROUTINE TERMINATED generation=$resetGeneration " +
+                "activeSequence=${activeSequence ?: "NONE"} " +
+                "platformUpSeen=$platformUpSeen syntheticTapOrUpEmitted=false",
+        )
+    }
+}
+
+private fun MotionEvent.describeRawTouch(
+    trackedPointerId: Int,
+    displacement: Float,
+    origin: String,
+): String {
+    val trackedIndex = findPointerIndex(trackedPointerId)
+    val x = trackedIndex.takeIf { it >= 0 }?.let(::getX)
+    val y = trackedIndex.takeIf { it >= 0 }?.let(::getY)
+    val toolType = trackedIndex.takeIf { it >= 0 }
+        ?.let(::getToolType)
+        ?.let(::motionEventToolTypeLabel)
+        ?: "UNAVAILABLE"
+    return "action=${MotionEvent.actionToString(action)} actionIndex=$actionIndex " +
+        "pointerCount=$pointerCount " +
+        "pointerIds=${(0 until pointerCount).joinToString(prefix = "[", postfix = "]") {
+            getPointerId(it).toString()
+        }} downTime=$downTime eventTime=$eventTime elapsed=${eventTime - downTime}ms " +
+        "trackedPointerId=$trackedPointerId x=${x ?: "NA"} y=${y ?: "NA"} " +
+        "deviceId=$deviceId source=0x${source.toString(16)} toolType=$toolType " +
+        "displacement=${String.format(Locale.US, "%.2f", displacement)} origin=$origin"
+}
+
+private fun motionEventToolTypeLabel(toolType: Int): String = when (toolType) {
+    MotionEvent.TOOL_TYPE_FINGER -> "FINGER"
+    MotionEvent.TOOL_TYPE_STYLUS -> "STYLUS"
+    MotionEvent.TOOL_TYPE_MOUSE -> "MOUSE"
+    MotionEvent.TOOL_TYPE_ERASER -> "ERASER"
+    MotionEvent.TOOL_TYPE_UNKNOWN -> "UNKNOWN"
+    else -> toolType.toString()
+}
+
+internal data class TouchSequenceToken(
+    val sequenceId: Int,
+    val generation: Int,
+    val downTimeMillis: Long,
+    val pointerId: Int,
+)
+
+internal enum class TapRejectionReason(val label: String) {
+    NO_GENUINE_PLATFORM_ACTION_DOWN("NO GENUINE PLATFORM ACTION_DOWN"),
+    NO_GENUINE_PLATFORM_ACTION_UP("NO GENUINE PLATFORM ACTION_UP"),
+    PLATFORM_ACTION_CANCEL("PLATFORM ACTION_CANCEL"),
+    COMPOSE_FABRICATED_RELEASE("COMPOSE-FABRICATED RELEASE"),
+    RESET_GENERATION_CHANGED("RESET GENERATION CHANGED"),
+    POINTER_SEQUENCE_MISMATCH("POINTER SEQUENCE MISMATCH"),
+    POINTER_INPUT_COROUTINE_INVALIDATED("POINTER-INPUT COROUTINE INVALIDATED"),
+    ADDITIONAL_POINTER_PARTICIPATED("ADDITIONAL POINTER PARTICIPATED"),
+}
+
+internal data class TouchReleaseVerdict(
+    val accepted: Boolean,
+    val sequenceId: Int?,
+    val generation: Int?,
+    val genuinePlatformUp: Boolean,
+    val platformCancelled: Boolean,
+    val coroutineInvalidated: Boolean,
+    val reason: TapRejectionReason?,
+) {
+    fun diagnosticMessage(): String {
+        val outcome = if (accepted) "TAP ACCEPTED" else "TAP REJECTED: ${reason?.label}"
+        return "$outcome sequence=${sequenceId ?: "NONE"} " +
+            "generation=${generation ?: "NONE"} genuinePlatformUp=$genuinePlatformUp " +
+            "platformCancelled=$platformCancelled " +
+            "coroutineInvalidated=$coroutineInvalidated"
+    }
+
+    companion object {
+        fun rejected(
+            sequenceId: Int?,
+            generation: Int?,
+            reason: TapRejectionReason,
+            genuinePlatformUp: Boolean = false,
+            platformCancelled: Boolean = false,
+            coroutineInvalidated: Boolean = false,
+        ) = TouchReleaseVerdict(
+            accepted = false,
+            sequenceId = sequenceId,
+            generation = generation,
+            genuinePlatformUp = genuinePlatformUp,
+            platformCancelled = platformCancelled,
+            coroutineInvalidated = coroutineInvalidated,
+            reason = reason,
+        )
+    }
+}
+
+internal class TrackpadTouchProvenance {
+    private data class LiveSequence(
+        val token: TouchSequenceToken,
+        var platformUpSeen: Boolean = false,
+        var platformCancelled: Boolean = false,
+        var coroutineInvalidated: Boolean = false,
+        var additionalPointerParticipated: Boolean = false,
+    )
+
+    private var currentGeneration = 0
+    private var nextSequenceId = 0
+    private var liveSequence: LiveSequence? = null
+
+    @Synchronized
+    fun reset(generation: Int) {
+        currentGeneration = generation
+        liveSequence = null
+    }
+
+    @Synchronized
+    fun recordPlatformDown(
+        generation: Int,
+        downTimeMillis: Long,
+        pointerId: Int,
+    ): TouchSequenceToken {
+        if (generation != currentGeneration) reset(generation)
+        nextSequenceId = if (nextSequenceId == MAX_SEQUENCE_ID) 1 else nextSequenceId + 1
+        return TouchSequenceToken(
+            sequenceId = nextSequenceId,
+            generation = generation,
+            downTimeMillis = downTimeMillis,
+            pointerId = pointerId,
+        ).also { token -> liveSequence = LiveSequence(token) }
+    }
+
+    @Synchronized
+    fun recordAdditionalPointer(generation: Int, downTimeMillis: Long) {
+        matchingSequence(generation, downTimeMillis)?.additionalPointerParticipated = true
+    }
+
+    @Synchronized
+    fun recordPlatformUp(generation: Int, downTimeMillis: Long, pointerId: Int) {
+        val sequence = matchingSequence(generation, downTimeMillis) ?: return
+        if (sequence.token.pointerId == pointerId) sequence.platformUpSeen = true
+    }
+
+    @Synchronized
+    fun recordPlatformCancel(generation: Int, downTimeMillis: Long) {
+        matchingSequence(generation, downTimeMillis)?.platformCancelled = true
+    }
+
+    @Synchronized
+    fun claimComposeDown(
+        generation: Int,
+        downTimeMillis: Long?,
+        pointerId: Int,
+    ): TouchSequenceToken? {
+        val sequence = liveSequence ?: return null
+        return sequence.token.takeIf {
+            downTimeMillis != null &&
+                it.generation == generation &&
+                generation == currentGeneration &&
+                it.downTimeMillis == downTimeMillis &&
+                it.pointerId == pointerId &&
+                !sequence.platformCancelled &&
+                !sequence.coroutineInvalidated
+        }
+    }
+
+    @Synchronized
+    fun validateComposeRelease(
+        token: TouchSequenceToken?,
+        generation: Int,
+        composeBackedByPlatformUp: Boolean,
+        composeDownTimeMillis: Long?,
+        composePointerId: Int?,
+        allowAdditionalPointers: Boolean,
+    ): TouchReleaseVerdict {
+        val sequence = liveSequence
+        val reason = when {
+            generation != currentGeneration ||
+                (token != null && token.generation != generation) ->
+                TapRejectionReason.RESET_GENERATION_CHANGED
+            token == null || sequence == null ->
+                TapRejectionReason.NO_GENUINE_PLATFORM_ACTION_DOWN
+            sequence.token != token -> TapRejectionReason.POINTER_SEQUENCE_MISMATCH
+            sequence.platformCancelled -> TapRejectionReason.PLATFORM_ACTION_CANCEL
+            sequence.coroutineInvalidated ->
+                TapRejectionReason.POINTER_INPUT_COROUTINE_INVALIDATED
+            composeBackedByPlatformUp &&
+                (composeDownTimeMillis != token?.downTimeMillis ||
+                    composePointerId != token?.pointerId) ->
+                TapRejectionReason.POINTER_SEQUENCE_MISMATCH
+            sequence.additionalPointerParticipated && !allowAdditionalPointers ->
+                TapRejectionReason.ADDITIONAL_POINTER_PARTICIPATED
+            !sequence.platformUpSeen -> TapRejectionReason.NO_GENUINE_PLATFORM_ACTION_UP
+            !composeBackedByPlatformUp -> TapRejectionReason.COMPOSE_FABRICATED_RELEASE
+            else -> null
+        }
+        return if (reason == null && sequence != null) {
+            TouchReleaseVerdict(
+                accepted = true,
+                sequenceId = sequence.token.sequenceId,
+                generation = sequence.token.generation,
+                genuinePlatformUp = true,
+                platformCancelled = false,
+                coroutineInvalidated = false,
+                reason = null,
+            )
+        } else {
+            TouchReleaseVerdict.rejected(
+                sequenceId = token?.sequenceId ?: sequence?.token?.sequenceId,
+                generation = token?.generation ?: sequence?.token?.generation,
+                reason = reason ?: TapRejectionReason.POINTER_SEQUENCE_MISMATCH,
+                genuinePlatformUp = sequence?.platformUpSeen == true,
+                platformCancelled = sequence?.platformCancelled == true,
+                coroutineInvalidated = sequence?.coroutineInvalidated == true,
+            )
+        }
+    }
+
+    @Synchronized
+    fun isLive(token: TouchSequenceToken?, generation: Int): Boolean {
+        val sequence = liveSequence ?: return false
+        return token != null && sequence.token == token &&
+            generation == currentGeneration && token.generation == generation &&
+            !sequence.platformCancelled && !sequence.coroutineInvalidated
+    }
+
+    @Synchronized
+    fun invalidateCoroutine(token: TouchSequenceToken?, generation: Int) {
+        val sequence = liveSequence ?: return
+        if (token != null && sequence.token == token && generation == currentGeneration) {
+            sequence.coroutineInvalidated = true
+        }
+    }
+
+    @Synchronized
+    fun complete(token: TouchSequenceToken?, generation: Int) {
+        val sequence = liveSequence ?: return
+        if (token != null && sequence.token == token && generation == currentGeneration) {
+            liveSequence = null
+        }
+    }
+
+    private fun matchingSequence(generation: Int, downTimeMillis: Long): LiveSequence? =
+        liveSequence?.takeIf {
+            generation == currentGeneration &&
+                it.token.generation == generation &&
+                it.token.downTimeMillis == downTimeMillis
+        }
+
+    private companion object {
+        const val MAX_SEQUENCE_ID = 1_000_000
+    }
+}
+
+internal class TrackpadGestureTracker(
     private val singleTapMaximumDurationMillis: Long,
     private val twoFingerTapMaximumDurationMillis: Long,
     private val doubleTapTimeoutMillis: Long,
@@ -657,6 +1306,7 @@ private class TrackpadGestureTracker(
     doubleTapSlop: Float,
 ) {
     private val touchSlopSquared = touchSlop * touchSlop
+    private val touchSlop = touchSlop
     private val doubleTapSlopSquared = doubleTapSlop * doubleTapSlop
     private val initialPositions = mutableMapOf<PointerId, Offset>()
     private var downUptimeMillis = 0L
@@ -665,8 +1315,12 @@ private class TrackpadGestureTracker(
     private var state = GestureTrackingState.IDLE
     private var cancellationReported = false
     private var pendingMovementReported = false
+    private var awaitingFirstDownAfterReset = true
 
-    fun handle(event: PointerEvent): GestureUpdate {
+    fun handle(
+        event: PointerEvent,
+        releaseVerdict: TouchReleaseVerdict? = null,
+    ): GestureUpdate {
         val pressedCount = event.changes.count { it.pressed }
         when (event.type) {
             PointerEventType.Press -> {
@@ -682,14 +1336,24 @@ private class TrackpadGestureTracker(
                         (pointer.position - previousTapPosition).getDistanceSquared() <=
                         doubleTapSlopSquared
                     val isSecondTap = hasPreviousTap && withinTime && withinDistance
-                    val diagnostics = when {
-                        isSecondTap -> listOf(
-                            "VALID SECOND TAP DETECTED",
-                            "HOLD TIMER STARTED",
+                    val diagnostics = buildList {
+                        if (awaitingFirstDownAfterReset) {
+                            add("FIRST ACTION_DOWN AFTER GESTURE RESET")
+                            awaitingFirstDownAfterReset = false
+                        }
+                        addAll(
+                            when {
+                                isSecondTap -> listOf(
+                                    "VALID SECOND TAP DETECTED",
+                                    "HOLD TIMER STARTED",
+                                )
+                                hasPreviousTap && !withinTime ->
+                                    listOf("SECOND TAP REJECTED: TIME")
+                                hasPreviousTap && !withinDistance ->
+                                    listOf("SECOND TAP REJECTED: DISTANCE")
+                                else -> emptyList()
+                            },
                         )
-                        hasPreviousTap && !withinTime -> listOf("SECOND TAP REJECTED: TIME")
-                        hasPreviousTap && !withinDistance -> listOf("SECOND TAP REJECTED: DISTANCE")
-                        else -> emptyList()
                     }
                     state = if (isSecondTap) {
                         clearPreviousTap()
@@ -732,6 +1396,10 @@ private class TrackpadGestureTracker(
                             return GestureUpdate(
                                 gesture = reportCancellationOnce(),
                                 allowMovement = true,
+                                diagnostics = listOf(
+                                    "TOUCH SLOP EXCEEDED",
+                                    "ORDINARY MOVEMENT STARTED",
+                                ),
                             )
                         }
                     }
@@ -789,10 +1457,20 @@ private class TrackpadGestureTracker(
                     return cancel()
                 }
                 if (pressedCount == 0) {
+                    if (releaseVerdict?.accepted != true) {
+                        return rejectRelease(
+                            releaseVerdict ?: TouchReleaseVerdict.rejected(
+                                sequenceId = null,
+                                generation = null,
+                                reason = TapRejectionReason.NO_GENUINE_PLATFORM_ACTION_UP,
+                            ),
+                        )
+                    }
                     val finalUptimeMillis = event.changes.maxOfOrNull { it.uptimeMillis }
                         ?: downUptimeMillis
                     val duration = finalUptimeMillis - downUptimeMillis
                     val completedState = state
+                    val displacement = maximumDisplacement(event)
                     val gesture = when (completedState) {
                         GestureTrackingState.SINGLE_PENDING -> {
                             if (!hasPointerExceededTolerance(event) &&
@@ -837,7 +1515,25 @@ private class TrackpadGestureTracker(
                         diagnostics = if (completedState == GestureTrackingState.SINGLE_PENDING &&
                             gesture == TrackpadGesture.SINGLE_TAP
                         ) {
-                            listOf("FIRST TAP RECORDED")
+                            listOf(
+                                "FIRST TAP RECORDED",
+                                tapEligibilityDiagnostic(
+                                    releaseVerdict,
+                                    duration,
+                                    displacement,
+                                ),
+                            )
+                        } else if (
+                            completedState == GestureTrackingState.SECOND_TAP_HOLD_PENDING &&
+                            gesture == TrackpadGesture.SINGLE_TAP
+                        ) {
+                            listOf(
+                                tapEligibilityDiagnostic(
+                                    releaseVerdict,
+                                    duration,
+                                    displacement,
+                                ),
+                            )
                         } else {
                             emptyList()
                         },
@@ -851,6 +1547,7 @@ private class TrackpadGestureTracker(
                 } else {
                     reportCancellationOnce()
                 }
+                clearPreviousTap()
                 resetCurrentGesture()
                 return GestureUpdate(
                     gesture = gesture,
@@ -876,9 +1573,16 @@ private class TrackpadGestureTracker(
         } else {
             null
         }
+        clearPreviousTap()
         resetCurrentGesture()
         return gesture
     }
+
+    fun isTwoFingerGesturePending(): Boolean =
+        state == GestureTrackingState.TWO_FINGER_PENDING
+
+    fun invalidateFromProvenance(verdict: TouchReleaseVerdict): GestureUpdate =
+        rejectRelease(verdict)
 
     private fun hasPointerExceededTolerance(event: PointerEvent): Boolean =
         event.changes.any { pointer ->
@@ -889,6 +1593,38 @@ private class TrackpadGestureTracker(
 
     private fun PointerInputChange.distanceSquaredFrom(position: Offset): Float =
         (this.position - position).getDistanceSquared()
+
+    private fun maximumDisplacement(event: PointerEvent): Float = event.changes.maxOfOrNull {
+        val initialPosition = initialPositions[it.id] ?: return@maxOfOrNull Float.POSITIVE_INFINITY
+        sqrt(it.distanceSquaredFrom(initialPosition))
+    } ?: 0f
+
+    private fun tapEligibilityDiagnostic(
+        releaseVerdict: TouchReleaseVerdict,
+        duration: Long,
+        displacement: Float,
+    ): String {
+        return "TAP ELIGIBLE: duration=${duration}ms<=${singleTapMaximumDurationMillis}ms " +
+            "displacement=${String.format(Locale.US, "%.2f", displacement)}<=" +
+            "${String.format(Locale.US, "%.2f", touchSlop)} " +
+            "releaseOrigin=PLATFORM_ACTION_UP sequence=${releaseVerdict.sequenceId} " +
+            "generation=${releaseVerdict.generation}"
+    }
+
+    private fun rejectRelease(verdict: TouchReleaseVerdict): GestureUpdate {
+        val gesture = if (state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE) {
+            TrackpadGesture.DOUBLE_TAP_HOLD_END
+        } else {
+            reportCancellationOnce()
+        }
+        clearPreviousTap()
+        resetCurrentGesture()
+        return GestureUpdate(
+            gesture = gesture,
+            cancelHold = true,
+            diagnostics = listOf(verdict.diagnosticMessage()),
+        )
+    }
 
     private fun cancel(endActiveDrag: Boolean = false): GestureUpdate {
         val gesture = if (endActiveDrag && state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE) {
@@ -925,7 +1661,7 @@ private class TrackpadGestureTracker(
     }
 }
 
-private data class GestureUpdate(
+internal data class GestureUpdate(
     val gesture: TrackpadGesture? = null,
     val allowMovement: Boolean = false,
     val scheduleHold: Boolean = false,
@@ -1234,6 +1970,17 @@ private fun TouchState.withSurfaceSize(
     }
 }
 
+internal fun TouchState.withTransientInputCleared(): TouchState = copy(
+    fingerX = 0f,
+    fingerY = 0f,
+    deltaX = 0f,
+    deltaY = 0f,
+    pointerCount = 0,
+    trackedPointerId = null,
+    action = TouchAction.CANCEL,
+    moveEventCount = 0,
+)
+
 private fun PointerEvent.findPointer(pointerId: PointerId?): PointerInputChange? =
     pointerId?.let { id -> changes.firstOrNull { it.id == id } }
 
@@ -1327,7 +2074,7 @@ private fun MouseButtonControl(
 private fun MouseDiagnosticsPanel(
     diagnostics: MouseDiagnostics,
     displayId: Int,
-    isScummVMConnected: Boolean,
+    connectionDiagnostics: ScummVMConnectionDiagnostics,
 ) {
     Column(
         modifier = Modifier
@@ -1363,10 +2110,29 @@ private fun MouseDiagnosticsPanel(
             )
             DiagnosticValue(value = "DISPLAY: $displayId")
             DiagnosticValue(
-                value = if (isScummVMConnected) "CONNECTED" else "DISCONNECTED",
+                value = if (connectionDiagnostics.isConnected) "CONNECTED" else "DISCONNECTED",
                 modifier = Modifier.padding(start = 16.dp),
             )
         }
+        Row(modifier = Modifier.fillMaxWidth()) {
+            DiagnosticValue(
+                value = if (connectionDiagnostics.bindingRequested) {
+                    "BINDING: REQUESTED"
+                } else {
+                    "BINDING: IDLE"
+                },
+                modifier = Modifier.weight(1f),
+            )
+            DiagnosticValue(
+                value = "RECONNECTS: ${connectionDiagnostics.reconnectAttemptCount}",
+                modifier = Modifier.weight(1f),
+            )
+            DiagnosticValue(
+                value = "LAST CONNECTION: ${connectionDiagnostics.lastConnectionEvent}",
+                modifier = Modifier.weight(2f),
+            )
+        }
+        DiagnosticValue(value = "BUTTON SOURCES: ${diagnostics.activeMouseButtonSources}")
     }
 }
 
@@ -1393,14 +2159,15 @@ private data class MouseDiagnostics(
     val dragActive: Boolean = false,
     val lastButtonAction: String = "NONE",
     val lastGesture: String = TrackpadGesture.NONE_LABEL,
+    val activeMouseButtonSources: String = "LEFT: NONE; RIGHT: NONE",
 )
 
-private enum class MouseButtonSource {
-    DEDICATED_BUTTON,
-    CONTROLLER,
-    TRACKPAD_TAP,
-    TRACKPAD_TWO_FINGER_TAP,
-    DOUBLE_TAP_HOLD,
+private enum class MouseButtonSource(val diagnosticLabel: String) {
+    DEDICATED_BUTTON("DEDICATED"),
+    CONTROLLER("CONTROLLER"),
+    TRACKPAD_TAP("TAP"),
+    TRACKPAD_TWO_FINGER_TAP("TWO-FINGER TAP"),
+    DOUBLE_TAP_HOLD("DOUBLE-TAP HOLD"),
 }
 
 private enum class DragSource(val label: String) {
@@ -1412,7 +2179,7 @@ private enum class DragSource(val label: String) {
 private const val TapClickDurationMillis = 50L
 private const val TwoFingerTapMaximumDurationMillis = 250L
 
-private enum class TrackpadGesture(val label: String) {
+internal enum class TrackpadGesture(val label: String) {
     SINGLE_TAP("SINGLE TAP"),
     TWO_FINGER_RIGHT_CLICK("TWO-FINGER RIGHT CLICK"),
     DOUBLE_TAP_HOLD_START("DRAG ACTIVATED: DOUBLE-TAP HOLD"),
@@ -1424,7 +2191,7 @@ private enum class TrackpadGesture(val label: String) {
     }
 }
 
-private data class TouchState(
+internal data class TouchState(
     val fingerX: Float = 0f,
     val fingerY: Float = 0f,
     val deltaX: Float = 0f,
@@ -1438,7 +2205,7 @@ private data class TouchState(
     val moveEventCount: Int = 0,
 )
 
-private enum class TouchAction(val label: String) {
+internal enum class TouchAction(val label: String) {
     DOWN("DOWN"),
     MOVE("MOVE"),
     UP("UP"),
@@ -1460,3 +2227,5 @@ private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private const val MaxMoveEventCount = 999_999
 private const val AdventurePadBridgeTag = "AdventurePadBridge"
+private const val RAW_TOUCH_TAG = "AdventurePadRawTouch"
+private const val RAW_SEQUENCE_LIMIT = 2
