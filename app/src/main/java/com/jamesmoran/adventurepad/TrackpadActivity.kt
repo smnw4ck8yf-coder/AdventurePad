@@ -8,6 +8,7 @@ import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.ViewConfiguration
+import android.widget.Toast
 import android.util.Log
 import android.view.Display
 import androidx.activity.ComponentActivity
@@ -18,11 +19,14 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -80,16 +84,60 @@ class TrackpadActivity : ComponentActivity() {
     private var connectionDiagnostics by mutableStateOf(ScummVMConnectionDiagnostics())
     private var mirrorOutputStatus by mutableStateOf(MirrorOutputStatus())
     private var gestureResetGeneration by mutableStateOf(0)
-    private var mirrorSurfaceView: MirrorSurfaceView? = null
+    private var mirrorHost: MirrorHost? = null
     private var mirrorLifecycleActive = false
     private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
         mutableSetOf<MouseButtonSource>()
     }
     private val mainHandler = Handler(Looper.getMainLooper())
     private val forwardedGamepadKeysDown = mutableSetOf<Int>()
+    private val controllerModeChordResolver = ControllerTriggerChordResolver(TRIGGER_CHORD_WINDOW_MILLIS)
+    private var triggerChordDeadline: Long? = null
+    private val triggerChordTimeoutRunnable = Runnable {
+        val deadline = triggerChordDeadline ?: return@Runnable
+        triggerChordDeadline = null
+        applyTriggerChordResolution(controllerModeChordResolver.onTimeout(deadline))
+    }
     private val rawTouchDiagnostics = RawTouchDiagnostics()
     private val touchProvenance = TrackpadTouchProvenance()
     private lateinit var pointerSpeedRepository: PointerSpeedRepository
+    private lateinit var mirrorCropRepository: MirrorCropRepository
+    private lateinit var displayModePreferencesRepository: DisplayModePreferencesRepository
+    private var mirrorSourceGeometry by mutableStateOf<MirrorSourceGeometry?>(null)
+    private var mirrorCursorState by mutableStateOf(MirrorCursorState())
+    private var cropEditorModel by mutableStateOf<CropEditorModel?>(null)
+    private var cropEditorVisible by mutableStateOf(false)
+    private var splitBeforeEditing = InterfaceSplit.Default
+    private var cropEditTransaction: CropEditTransaction? = null
+    private var lastCropAcknowledgement by mutableStateOf<CropAcknowledgement?>(null)
+    private var cropSavePending by mutableStateOf(false)
+    private var activeCropGeneration by mutableStateOf(0L)
+    private val cropSaveGate = CropSaveGate()
+    private val cropApplicationGate = MirrorCropApplicationGate()
+    private var displayMode by mutableStateOf(DisplayMode.TRACKPAD)
+    private var interfacePanelRequested by mutableStateOf(false)
+    private var requestedPreferredDisplayMode: DisplayMode? = null
+    private var lastUpperPresentationAcknowledgement by mutableStateOf<UpperPresentationAcknowledgement?>(null)
+    private val upperPresentationGate = UpperPresentationGate()
+    private var lastCompositionDiagnostic: String? = null
+    private var compositionDiagnosticCount = 0
+    private lateinit var twoFingerDoubleTapResolver: TwoFingerDoubleTapResolver
+    private var pendingTwoFingerTapUptimeMillis: Long? = null
+    private val twoFingerTapTimeoutRunnable = Runnable {
+        val expected = pendingTwoFingerTapUptimeMillis ?: return@Runnable
+        pendingTwoFingerTapUptimeMillis = null
+        if (twoFingerDoubleTapResolver.resolveTimeout(expected)) {
+            recordGestureDiagnostic("TWO-FINGER DOUBLE-TAP TIMEOUT: CONVERTED TO RIGHT CLICK")
+            sendTwoFingerRightClick()
+        }
+    }
+    private var pendingSplitPreview: InterfaceSplit? = null
+    private var cropPreviewScheduled = false
+    private val cropPreviewRunnable = Runnable {
+        cropPreviewScheduled = false
+        pendingSplitPreview?.let(::previewSplitImmediately)
+        pendingSplitPreview = null
+    }
     private val tapLeftButtonRelease = Runnable {
         releaseMouseButton(ScummVMMouseButton.LEFT, MouseButtonSource.TRACKPAD_TAP)
     }
@@ -105,16 +153,56 @@ class TrackpadActivity : ComponentActivity() {
         touchProvenance.reset(gestureResetGeneration)
         rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
         pointerSpeedRepository = PointerSpeedRepository.create(this, lifecycleScope)
+        mirrorCropRepository = MirrorCropRepository.create(this, lifecycleScope)
+        displayModePreferencesRepository = DisplayModePreferencesRepository.create(this, lifecycleScope)
+        twoFingerDoubleTapResolver = TwoFingerDoubleTapResolver(
+            ViewConfiguration.getDoubleTapTimeout().toLong(),
+        )
+        lifecycleScope.launch {
+            mirrorCropRepository.selection.collect { selection ->
+                val geometry = mirrorSourceGeometry
+                val profile = selection.profile
+                if (!cropEditorVisible && geometry != null && selection.gameId == geometry.gameId &&
+                    profile.isCompatibleWith(geometry)
+                ) {
+                    sendSplit(profile.split, saveAfterAcknowledgement = false)
+                }
+                reconcileDisplayComposition()
+            }
+        }
+        lifecycleScope.launch {
+            displayModePreferencesRepository.preferences.collect {
+                reconcileDisplayComposition()
+            }
+        }
         enableEdgeToEdge()
 
         setContent {
             val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
+            val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
+            val cropSelection by mirrorCropRepository.selection.collectAsState()
+            val cropProfile = cropSelection.profile
             AdventurePadTheme {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
                     displayId = currentDisplayId,
                     connectionDiagnostics = connectionDiagnostics,
                     mirrorOutputStatus = mirrorOutputStatus,
+                    mirrorSourceGeometry = mirrorSourceGeometry,
+                    mirrorCursorState = mirrorCursorState,
+                    cropEditorModel = cropEditorModel.takeIf { cropEditorVisible },
+                    cropProfile = cropProfile,
+                    lastCropAcknowledgement = lastCropAcknowledgement,
+                    lastUpperPresentationAcknowledgement = lastUpperPresentationAcknowledgement,
+                    cropSavePending = cropSavePending,
+                    activeCropGeneration = activeCropGeneration,
+                    displayModePreferences = displayModePreferences,
+                    displayMode = displayMode,
+                    interfacePanelVisible = interfacePanelRequested,
+                    upperExpansionSupported = cropProfile
+                        .takeIf { profile -> mirrorSourceGeometry?.let(profile::isCompatibleWith) == true }
+                        ?.crop
+                        ?.let(::deriveUpperGameplayRegion) != null,
                     gestureResetGeneration = gestureResetGeneration,
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
@@ -123,12 +211,28 @@ class TrackpadActivity : ComponentActivity() {
                             pointerSpeedRepository.setPointerSpeed(selectedSpeed)
                         }
                     },
+                    onPreferredDisplayModeChanged = { preferredMode ->
+                        requestPreferredDisplayMode(preferredMode)
+                    },
                     onGesture = ::handleTrackpadGesture,
                     onGestureDiagnostic = ::recordGestureDiagnostic,
                     onButtonDown = ::pressDedicatedButton,
                     onButtonUp = ::releaseDedicatedButton,
                     onMirrorViewAvailable = ::onMirrorViewAvailable,
                     onMirrorViewDisposed = ::onMirrorViewDisposed,
+                    onOpenCropEditor = ::openCropEditor,
+                    onCropEditorChanged = { updatedModel ->
+                        cropSaveGate.cancel()
+                        cropSavePending = false
+                        cropEditTransaction?.update(updatedModel.split)
+                        cropEditorModel = updatedModel
+                        queueSplitPreview(updatedModel.split)
+                    },
+                    onSaveCrop = {
+                        cancelPendingCropPreview()
+                        sendSplit(cropEditorModel?.split, saveAfterAcknowledgement = true)
+                    },
+                    onCancelCrop = ::cancelCropEditor,
                     onRestoreTrackpad = ::restoreTrackpad,
                     onRestoreBothScreens = ::restoreBothScreens,
                 )
@@ -144,12 +248,38 @@ class TrackpadActivity : ComponentActivity() {
             val connectionWasEstablished = !connectionDiagnostics.isConnected &&
                 updatedDiagnostics.isConnected
             connectionDiagnostics = updatedDiagnostics
-            if (connectionWasLost) discardLocalInputState("CONNECTION LOSS")
+            if (connectionWasLost) {
+                cropApplicationGate.invalidate()
+                upperPresentationGate.cancel(invalidateRequest = true)
+                discardLocalInputState("CONNECTION LOSS")
+                if (cropEditorVisible) cancelCropEditor()
+                enterSafeTrackpadMode()
+            }
             if (connectionWasEstablished) {
-                mirrorSurfaceView?.refreshAttachment(currentDisplayId)
+                cropApplicationGate.invalidate()
+                upperPresentationGate.cancel(invalidateRequest = true)
+                mirrorHost?.refreshAttachment(currentDisplayId)
+                ScummVMInputClient.queryMirrorGeometry()
+                reconcileDisplayComposition()
             }
         }
-        ScummVMInputClient.setMirrorStatusListener { status -> mirrorOutputStatus = status }
+        ScummVMInputClient.setMirrorStatusListener { status ->
+            mirrorOutputStatus = status
+            val appliesToActiveSurface = mirrorHost?.ownsGeneration(status.generation) == true
+            if (status.state == MirrorOutputState.SUPPORTED && appliesToActiveSurface) {
+                ScummVMInputClient.queryMirrorGeometry()
+                reconcileDisplayComposition()
+            } else if (appliesToActiveSurface && (status.state == MirrorOutputState.FAILED ||
+                status.state == MirrorOutputState.UNSUPPORTED_NO_TEXTURE ||
+                status.state == MirrorOutputState.DETACHED)
+            ) {
+                enterSafeTrackpadMode()
+            }
+        }
+        ScummVMInputClient.setMirrorGeometryListener(::handleMirrorGeometry)
+        ScummVMInputClient.setCropAcknowledgementListener(::handleCropAcknowledgement)
+        ScummVMInputClient.setUpperPresentationAcknowledgementListener(::handleUpperPresentationAcknowledgement)
+        ScummVMInputClient.setMirrorCursorListener { mirrorCursorState = it }
         ScummVMInputClient.bind(this)
         recordLifecycle("STARTED")
     }
@@ -157,13 +287,16 @@ class TrackpadActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         mirrorLifecycleActive = true
-        mirrorSurfaceView?.activate(currentDisplayId)
+        mirrorHost?.activate(currentDisplayId)
+        reconcileDisplayComposition()
         recordLifecycle("RESUMED")
     }
 
     override fun onPause() {
+        if (cropEditorVisible) cancelCropEditor()
+        enterSafeTrackpadMode()
         mirrorLifecycleActive = false
-        mirrorSurfaceView?.deactivate()
+        mirrorHost?.deactivate()
         releaseAllMouseButtons("PAUSE")
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
@@ -179,13 +312,264 @@ class TrackpadActivity : ComponentActivity() {
         ScummVMInputClient.unbind()
         ScummVMInputClient.setConnectionStateListener(null)
         ScummVMInputClient.setMirrorStatusListener(null)
+        ScummVMInputClient.setMirrorGeometryListener(null)
+        ScummVMInputClient.setCropAcknowledgementListener(null)
+        ScummVMInputClient.setUpperPresentationAcknowledgementListener(null)
+        ScummVMInputClient.setMirrorCursorListener(null)
         super.onStop()
+    }
+
+    private fun openCropEditor() {
+        val geometry = mirrorSourceGeometry ?: return
+        if (!geometry.isSupported) return
+        val saved = mirrorCropRepository.selection.value.profile
+        splitBeforeEditing = saved.split.takeIf { saved.isCompatibleWith(geometry) }
+            ?: InterfaceSplit.Default.snappedTo(geometry.height)
+        cropEditTransaction = CropEditTransaction(splitBeforeEditing)
+        cropEditorModel = CropEditorModel.create(splitBeforeEditing, geometry)
+        cropEditorVisible = true
+        lastCropAcknowledgement = null
+        cropSavePending = false
+        reconcileDisplayComposition()
+    }
+
+    private fun cancelCropEditor() {
+        if (!cropEditorVisible) return
+        cancelPendingCropPreview()
+        cropSaveGate.cancel()
+        cropSavePending = false
+        val completion = cancelSplitEditor(cropEditTransaction, splitBeforeEditing)
+        finishCropEditor(completion)
+        reconcileDisplayComposition()
+    }
+
+    private fun finishCropEditor(completion: SplitEditorCompletion) {
+        splitBeforeEditing = completion.split
+        cropEditorVisible = completion.editorVisible
+        cropEditorModel = null
+        cropEditTransaction = null
+    }
+
+    private fun sendSplit(split: InterfaceSplit?, saveAfterAcknowledgement: Boolean) {
+        val geometry = mirrorSourceGeometry ?: return
+        if (split == null || !split.isValid() || !geometry.isSupported) return
+        val snappedSplit = split.snappedTo(geometry.height)
+        val crop = snappedSplit.interfaceCrop
+        if (!saveAfterAcknowledgement && !cropApplicationGate.begin(
+                MirrorCropRequest(crop, geometry.generation),
+            )
+        ) return
+        val generation = MirrorCropGenerations.next()
+        activeCropGeneration = 0L
+        if (saveAfterAcknowledgement && !cropSaveGate.begin(generation, snappedSplit)) return
+        if (saveAfterAcknowledgement) cropSavePending = true
+        if (!ScummVMInputClient.applyMirrorCrop(crop, generation, geometry.generation)) {
+            if (!saveAfterAcknowledgement) cropApplicationGate.invalidate()
+            if (saveAfterAcknowledgement) {
+                cropSaveGate.cancel()
+                cropSavePending = false
+            }
+        }
+    }
+
+    private fun sendCropImmediately(crop: NormalizedCrop) {
+        val geometry = mirrorSourceGeometry ?: return
+        if (!crop.isValid() || !geometry.isSupported) return
+        if (!cropApplicationGate.begin(MirrorCropRequest(crop, geometry.generation))) return
+        activeCropGeneration = 0L
+        if (!ScummVMInputClient.applyMirrorCrop(
+                crop,
+                MirrorCropGenerations.next(),
+                geometry.generation,
+            )
+        ) cropApplicationGate.invalidate()
+    }
+
+    private fun previewSplitImmediately(split: InterfaceSplit) {
+        if (cropEditorVisible && cropEditorModel?.split == split) reconcileDisplayComposition()
+    }
+
+    private fun queueSplitPreview(split: InterfaceSplit) {
+        pendingSplitPreview = split
+        if (cropPreviewScheduled) return
+        cropPreviewScheduled = true
+        mainHandler.postDelayed(cropPreviewRunnable, CROP_PREVIEW_INTERVAL_MILLIS)
+    }
+
+    private fun cancelPendingCropPreview() {
+        mainHandler.removeCallbacks(cropPreviewRunnable)
+        cropPreviewScheduled = false
+        pendingSplitPreview = null
+    }
+
+    private fun handleMirrorGeometry(geometry: MirrorSourceGeometry) {
+        val previous = mirrorSourceGeometry
+        val changed = previous != null &&
+            (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
+        mirrorSourceGeometry = geometry
+        mirrorCropRepository.selectGame(geometry.gameId)
+        if (!geometry.isSupported) {
+            if (cropEditorVisible) cancelCropEditor()
+            return
+        }
+        if (previous?.gameId != geometry.gameId) {
+            sendCropImmediately(NormalizedCrop.FullFrame)
+            return
+        }
+        if (changed && cropEditorVisible) {
+            cancelPendingCropPreview()
+            cropSaveGate.cancel()
+            cropSavePending = false
+            cropEditorVisible = false
+            cropEditorModel = null
+            cropEditTransaction = null
+        }
+        val saved = mirrorCropRepository.selection.value.profile
+        saved.split.takeIf { saved.isCompatibleWith(geometry) }
+            ?.let { sendSplit(it, saveAfterAcknowledgement = false) }
+            ?: sendCropImmediately(NormalizedCrop.FullFrame)
+        reconcileDisplayComposition()
+    }
+
+    private fun handleCropAcknowledgement(acknowledgement: CropAcknowledgement) {
+        lastCropAcknowledgement = acknowledgement
+        val geometry = mirrorSourceGeometry
+        if (acknowledgement.result == CropAcknowledgementResult.APPLIED && geometry != null &&
+            acknowledgement.geometryGeneration == geometry.generation
+        ) {
+            activeCropGeneration = acknowledgement.cropGeneration
+        }
+        val matchedPendingSave = cropSaveGate.pendingGeneration == acknowledgement.cropGeneration
+        if (matchedPendingSave) cropSavePending = false
+        val split = cropSaveGate.acknowledge(acknowledgement) ?: return
+        val activeGeometry = geometry ?: return
+        if (acknowledgement.geometryGeneration != activeGeometry.generation) return
+        val completion = saveSplitEditor(split)
+        if (!completion.shouldPersist) return
+        lifecycleScope.launch {
+            mirrorCropRepository.save(
+                MirrorCropProfile(
+                    split = completion.split,
+                    sourceWidth = activeGeometry.width,
+                    sourceHeight = activeGeometry.height,
+                    sourceAspectRatio = activeGeometry.aspectRatio,
+                    confirmed = true,
+                    requiresReview = false,
+                ),
+            )
+            finishCropEditor(completion)
+            reconcileDisplayComposition()
+        }
+    }
+
+    private fun reconcileDisplayComposition() {
+        if (!::displayModePreferencesRepository.isInitialized ||
+            !::mirrorCropRepository.isInitialized
+        ) return
+        val preferences = displayModePreferencesRepository.preferences.value
+        val geometry = mirrorSourceGeometry
+        val selection = mirrorCropRepository.selection.value
+        val profile = selection.profile
+        val savedSplit = geometry?.let {
+            profile.takeIf { candidate -> selection.gameId == it.gameId && candidate.isCompatibleWith(it) }
+                ?.split
+        }
+        val activeView = mirrorHost
+        val activeSurfaceReady = mirrorOutputStatus.state == MirrorOutputState.SUPPORTED &&
+            activeView?.ownsGeneration(mirrorOutputStatus.generation) == true
+        val target = resolvePresentationTarget(
+            preferredMode = requestedPreferredDisplayMode ?: preferences.preferredMode,
+            savedSplit = savedSplit,
+            editorSplit = cropEditorModel?.split.takeIf { cropEditorVisible },
+            connected = connectionDiagnostics.isConnected,
+            activeSurfaceReady = activeSurfaceReady,
+        )
+        logCompositionTransition(
+            requestedMode = requestedPreferredDisplayMode ?: preferences.preferredMode,
+            effectiveMode = target.mode,
+            mirrorRequired = target.runtimePanelRequested || target.owner == PresentationOwner.EDITOR,
+            connected = connectionDiagnostics.isConnected,
+            activeSurfaceReady = activeSurfaceReady,
+            owner = target.owner,
+        )
+        interfacePanelRequested = target.runtimePanelRequested
+        displayMode = target.mode
+        if (target.mode == DisplayMode.INTERFACE) {
+            if (target.owner == PresentationOwner.EDITOR) {
+                sendCropImmediately(target.lowerCrop)
+            } else {
+                sendSplit(savedSplit, saveAfterAcknowledgement = false)
+            }
+        }
+        requestUpperPresentation(target.mode, target.upperCrop)
+    }
+
+    private fun enterSafeTrackpadMode() {
+        val crop = mirrorCropRepository.selection.value.profile.crop.takeIf { it.isValid() }
+            ?: NormalizedCrop.FullFrame
+        displayMode = DisplayMode.TRACKPAD
+        interfacePanelRequested = false
+        requestUpperPresentation(DisplayMode.TRACKPAD, crop)
+    }
+
+    private fun requestUpperPresentation(mode: DisplayMode, crop: NormalizedCrop) {
+        val geometry = mirrorSourceGeometry ?: return
+        if (!geometry.isSupported || !connectionDiagnostics.isConnected) return
+        val generation = DisplayModeGenerations.next()
+        val request = UpperPresentationRequest(mode, crop, geometry.generation)
+        if (!upperPresentationGate.begin(generation, request)) return
+        if (!ScummVMInputClient.applyDisplayMode(mode, crop, generation, geometry.generation)) {
+            upperPresentationGate.cancel(invalidateRequest = true)
+            displayMode = DisplayMode.TRACKPAD
+            interfacePanelRequested = false
+        }
+    }
+
+    private fun logCompositionTransition(
+        requestedMode: DisplayMode,
+        effectiveMode: DisplayMode,
+        mirrorRequired: Boolean,
+        connected: Boolean,
+        activeSurfaceReady: Boolean,
+        owner: PresentationOwner,
+    ) {
+        val diagnostic = "composition requested=${requestedMode.name} effective=${effectiveMode.name} " +
+            "owner=${owner.name} mirrorRequired=$mirrorRequired connected=$connected " +
+            "activeSurfaceReady=$activeSurfaceReady"
+        if (diagnostic == lastCompositionDiagnostic || compositionDiagnosticCount >= 32) return
+        lastCompositionDiagnostic = diagnostic
+        compositionDiagnosticCount += 1
+        Log.i("AdventurePadMirrorInit", "compositionEvent=$compositionDiagnosticCount/32 $diagnostic")
+    }
+
+    private fun handleUpperPresentationAcknowledgement(
+        acknowledgement: UpperPresentationAcknowledgement,
+    ) {
+        if (!upperPresentationGate.acknowledge(acknowledgement)) return
+        lastUpperPresentationAcknowledgement = acknowledgement
+        when (acknowledgement.result) {
+            UpperPresentationResult.FULL_FRAME_APPLIED,
+            UpperPresentationResult.EXPANDED_APPLIED,
+            UpperPresentationResult.EXPANDED_UNSUPPORTED_SHAPE,
+            -> Unit
+            UpperPresentationResult.INVALID_CROP,
+            UpperPresentationResult.STALE_GENERATION,
+            UpperPresentationResult.UNSUPPORTED_RENDERER,
+            -> {
+                upperPresentationGate.cancel(invalidateRequest = true)
+                enterSafeTrackpadMode()
+            }
+        }
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
         if (event.isFromSource(InputDevice.SOURCE_JOYSTICK) &&
             event.actionMasked == MotionEvent.ACTION_MOVE &&
-            ScummVMInputClient.sendJoystickMotion(event)
+            ScummVMInputClient.sendJoystickMotion(event) { trigger ->
+                applyTriggerChordResolution(
+                    controllerModeChordResolver.onAxis(trigger, event.eventTime),
+                )
+            }
         ) {
             return true
         }
@@ -248,9 +632,10 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        enterSafeTrackpadMode()
         mirrorLifecycleActive = false
-        mirrorSurfaceView?.dispose()
-        mirrorSurfaceView = null
+        mirrorHost?.dispose()
+        mirrorHost = null
         releaseAllMouseButtons("DESTROY")
         recordLifecycle("DESTROYED")
         super.onDestroy()
@@ -263,7 +648,7 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        mirrorSurfaceView?.deactivate()
+        mirrorHost?.deactivate()
         releaseAllMouseButtons("NEW INTENT")
         releaseForwardedGamepadKeys()
         ScummVMInputClient.releaseJoystickAxes()
@@ -273,24 +658,38 @@ class TrackpadActivity : ComponentActivity() {
             ?.let { "Received launch request: $it" }
             ?: "Received a new intent without a launch reason."
         recordLifecycle("NEW_INTENT")
-        if (mirrorLifecycleActive) mirrorSurfaceView?.activate(currentDisplayId)
+        if (mirrorLifecycleActive) mirrorHost?.activate(currentDisplayId)
     }
 
-    private fun onMirrorViewAvailable(view: MirrorSurfaceView) {
-        if (mirrorSurfaceView === view) return
-        mirrorSurfaceView?.dispose()
-        mirrorSurfaceView = view
-        if (mirrorLifecycleActive) view.activate(currentDisplayId)
+    private fun onMirrorViewAvailable(host: MirrorHost) {
+        if (mirrorHost === host) return
+        mirrorHost?.dispose()
+        invalidateAppliedCropForMirrorHostChange()
+        mirrorHost = host
+        if (mirrorLifecycleActive) host.activate(currentDisplayId)
+        reconcileDisplayComposition()
     }
 
-    private fun onMirrorViewDisposed(view: MirrorSurfaceView) {
-        if (mirrorSurfaceView !== view) return
-        view.dispose()
-        mirrorSurfaceView = null
+    private fun onMirrorViewDisposed(host: MirrorHost) {
+        if (mirrorHost !== host) return
+        host.dispose()
+        invalidateAppliedCropForMirrorHostChange()
+        mirrorHost = null
+        if (displayMode == DisplayMode.INTERFACE) {
+            displayMode = DisplayMode.TRACKPAD
+            val crop = mirrorCropRepository.selection.value.profile.crop.takeIf { it.isValid() }
+                ?: NormalizedCrop.FullFrame
+            requestUpperPresentation(DisplayMode.TRACKPAD, crop)
+        }
+    }
+
+    private fun invalidateAppliedCropForMirrorHostChange() {
+        cropApplicationGate.invalidate()
+        activeCropGeneration = 0L
     }
 
     private fun restoreTrackpad() {
-        mirrorSurfaceView?.deactivate()
+        mirrorHost?.deactivate()
         releaseAllMouseButtons("RESTORE TRACKPAD")
         lastLaunchResult = "Trackpad restore in progress…"
         lastLaunchResult = DualDisplayCoordinator.launchTrackpad(
@@ -300,7 +699,7 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun restoreBothScreens() {
-        mirrorSurfaceView?.deactivate()
+        mirrorHost?.deactivate()
         releaseAllMouseButtons("RESTORE")
         lastLaunchResult = "Restore in progress…"
         lastLaunchResult = DualDisplayCoordinator.restoreBoth(this).message
@@ -362,6 +761,31 @@ class TrackpadActivity : ComponentActivity() {
             ScummVMInputClient.sendGamepadKeyEvent(KeyEvent.ACTION_UP, keyCode)
         }
         forwardedGamepadKeysDown.clear()
+        resetTriggerChord()
+    }
+
+    private fun applyTriggerChordResolution(resolution: TriggerChordResolution) {
+        resolution.forward.forEach(ScummVMInputClient::sendJoystickAxisValue)
+        resolution.scheduleTimeoutAt?.let { deadline ->
+            triggerChordDeadline = deadline
+            mainHandler.removeCallbacks(triggerChordTimeoutRunnable)
+            mainHandler.postDelayed(
+                triggerChordTimeoutRunnable,
+                (deadline - android.os.SystemClock.uptimeMillis()).coerceAtLeast(0L),
+            )
+        }
+        if (resolution.toggle) {
+            triggerChordDeadline = null
+            mainHandler.removeCallbacks(triggerChordTimeoutRunnable)
+            recordGestureDiagnostic("L2 + R2 TRIGGER-AXIS CHORD RECOGNIZED")
+            togglePreferredDisplayMode()
+        }
+    }
+
+    private fun resetTriggerChord() {
+        triggerChordDeadline = null
+        mainHandler.removeCallbacks(triggerChordTimeoutRunnable)
+        controllerModeChordResolver.reset().forEach(ScummVMInputClient::sendJoystickAxisValue)
     }
 
     private fun pressDedicatedButton(button: ScummVMMouseButton) {
@@ -386,14 +810,73 @@ class TrackpadActivity : ComponentActivity() {
     private fun handleTrackpadGesture(gesture: TrackpadGesture) {
         recordGestureDiagnostic(gesture.label)
         when (gesture) {
-            TrackpadGesture.SINGLE_TAP -> sendTapLeftClick()
-            TrackpadGesture.TWO_FINGER_RIGHT_CLICK -> sendTwoFingerRightClick()
+            TrackpadGesture.SINGLE_TAP -> {
+                resolvePendingTwoFingerTapAsRightClick()
+                sendTapLeftClick()
+            }
+            TrackpadGesture.TWO_FINGER_RIGHT_CLICK -> handleTwoFingerTap()
             TrackpadGesture.DOUBLE_TAP_HOLD_START -> startDoubleTapHoldDrag()
             TrackpadGesture.DOUBLE_TAP_HOLD_END -> releaseMouseButton(
                 ScummVMMouseButton.LEFT,
                 MouseButtonSource.DOUBLE_TAP_HOLD,
             )
-            TrackpadGesture.CANCELLED -> Unit
+            TrackpadGesture.CANCELLED -> resolvePendingTwoFingerTapAsRightClick()
+        }
+    }
+
+    private fun handleTwoFingerTap() {
+        val now = android.os.SystemClock.uptimeMillis()
+        when (twoFingerDoubleTapResolver.onTwoFingerTap(now)) {
+            TwoFingerTapResolution.WAIT_FOR_SECOND_TAP -> {
+                recordGestureDiagnostic("FIRST TWO-FINGER TAP RECOGNIZED: WAITING FOR SECOND TAP")
+                pendingTwoFingerTapUptimeMillis = now
+                mainHandler.removeCallbacks(twoFingerTapTimeoutRunnable)
+                mainHandler.postDelayed(
+                    twoFingerTapTimeoutRunnable,
+                    ViewConfiguration.getDoubleTapTimeout().toLong(),
+                )
+            }
+            TwoFingerTapResolution.TOGGLE_MODE -> {
+                recordGestureDiagnostic("SECOND TWO-FINGER TAP RECOGNIZED: TOGGLING MODE")
+                pendingTwoFingerTapUptimeMillis = null
+                mainHandler.removeCallbacks(twoFingerTapTimeoutRunnable)
+                togglePreferredDisplayMode()
+            }
+            TwoFingerTapResolution.NONE -> sendTwoFingerRightClick()
+        }
+    }
+
+    private fun resolvePendingTwoFingerTapAsRightClick() {
+        mainHandler.removeCallbacks(twoFingerTapTimeoutRunnable)
+        pendingTwoFingerTapUptimeMillis = null
+        if (twoFingerDoubleTapResolver.cancelAndResolveSingleTap()) sendTwoFingerRightClick()
+    }
+
+    private fun togglePreferredDisplayMode() {
+        val preferences = displayModePreferencesRepository.preferences.value
+        val currentMode = requestedPreferredDisplayMode ?: preferences.preferredMode
+        val nextMode = if (currentMode == DisplayMode.INTERFACE) DisplayMode.TRACKPAD else DisplayMode.INTERFACE
+        Toast.makeText(
+            this,
+            if (nextMode == DisplayMode.INTERFACE) "SPLIT VIEW ON" else "TRACKPAD MODE",
+            Toast.LENGTH_SHORT,
+        ).show()
+        requestPreferredDisplayMode(nextMode)
+    }
+
+    private fun requestPreferredDisplayMode(preferredMode: DisplayMode) {
+        requestedPreferredDisplayMode = preferredMode
+        if (preferredMode == DisplayMode.TRACKPAD) enterSafeTrackpadMode() else reconcileDisplayComposition()
+        lifecycleScope.launch {
+            try {
+                val current = displayModePreferencesRepository.preferences.value
+                displayModePreferencesRepository.save(current.copy(preferredMode = preferredMode))
+            } finally {
+                if (requestedPreferredDisplayMode == preferredMode) {
+                    requestedPreferredDisplayMode = null
+                    reconcileDisplayComposition()
+                }
+            }
         }
     }
 
@@ -474,6 +957,7 @@ class TrackpadActivity : ComponentActivity() {
         resetGestureRecognition(reason)
         mainHandler.removeCallbacks(tapLeftButtonRelease)
         forwardedGamepadKeysDown.clear()
+        resetTriggerChord()
         ScummVMMouseButton.entries.forEach { button ->
             val sources = mouseButtonSources.getValue(button)
             if (sources.isNotEmpty()) {
@@ -485,6 +969,9 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun resetGestureRecognition(reason: String) {
+        mainHandler.removeCallbacks(twoFingerTapTimeoutRunnable)
+        pendingTwoFingerTapUptimeMillis = null
+        if (::twoFingerDoubleTapResolver.isInitialized) twoFingerDoubleTapResolver.reset()
         gestureResetGeneration++
         touchProvenance.reset(gestureResetGeneration)
         rawTouchDiagnostics.reset(gestureResetGeneration, reason)
@@ -555,6 +1042,8 @@ class TrackpadActivity : ComponentActivity() {
     private companion object {
         const val TAG = "AdventurePadLifecycle"
         const val GESTURE_TAG = "AdventurePadGesture"
+        const val CROP_PREVIEW_INTERVAL_MILLIS = 16L
+        const val TRIGGER_CHORD_WINDOW_MILLIS = 120L
     }
 }
 
@@ -564,16 +1053,33 @@ private fun AdventurePadScreen(
     displayId: Int,
     connectionDiagnostics: ScummVMConnectionDiagnostics,
     mirrorOutputStatus: MirrorOutputStatus,
+    mirrorSourceGeometry: MirrorSourceGeometry?,
+    mirrorCursorState: MirrorCursorState,
+    cropEditorModel: CropEditorModel?,
+    cropProfile: MirrorCropProfile,
+    lastCropAcknowledgement: CropAcknowledgement?,
+    lastUpperPresentationAcknowledgement: UpperPresentationAcknowledgement?,
+    cropSavePending: Boolean,
+    activeCropGeneration: Long,
+    displayModePreferences: DisplayModePreferences,
+    displayMode: DisplayMode,
+    interfacePanelVisible: Boolean,
+    upperExpansionSupported: Boolean,
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
+    onPreferredDisplayModeChanged: (DisplayMode) -> Unit,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
-    onMirrorViewAvailable: (MirrorSurfaceView) -> Unit,
-    onMirrorViewDisposed: (MirrorSurfaceView) -> Unit,
+    onMirrorViewAvailable: (MirrorHost) -> Unit,
+    onMirrorViewDisposed: (MirrorHost) -> Unit,
+    onOpenCropEditor: () -> Unit,
+    onCropEditorChanged: (CropEditorModel) -> Unit,
+    onSaveCrop: () -> Unit,
+    onCancelCrop: () -> Unit,
     onRestoreTrackpad: () -> Unit,
     onRestoreBothScreens: () -> Unit,
 ) {
@@ -581,69 +1087,128 @@ private fun AdventurePadScreen(
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var settingsVisible by rememberSaveable { mutableStateOf(false) }
 
-    BackHandler(enabled = settingsVisible) {
-        settingsVisible = false
+    BackHandler(enabled = settingsVisible || cropEditorModel != null) {
+        if (cropEditorModel != null) onCancelCrop() else settingsVisible = false
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(TrackpadBackground)
-            .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
-        if (settingsVisible) {
+        if (shouldShowSplitEditorControls(cropEditorModel) && mirrorSourceGeometry != null) {
+            MirrorCropEditor(
+                model = checkNotNull(cropEditorModel),
+                cropNeedsReview = cropProfile.requiresReview,
+                savePending = cropSavePending,
+                onModelChanged = onCropEditorChanged,
+                onSave = onSaveCrop,
+                onCancel = onCancelCrop,
+                onViewAvailable = onMirrorViewAvailable,
+                onViewDisposed = onMirrorViewDisposed,
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .weight(1f),
+            )
+        } else if (settingsVisible) {
             PointerSpeedSettings(
                 pointerSpeed = pointerSpeed,
                 onPointerSpeedSelected = onPointerSpeedSelected,
+                displayModePreferences = displayModePreferences,
+                displayMode = displayMode,
+                upperExpansionSupported = upperExpansionSupported,
+                onPreferredDisplayModeChanged = onPreferredDisplayModeChanged,
+                cropConfigurationEnabled = mirrorSourceGeometry?.isSupported == true,
+                onConfigureCrop = {
+                    settingsVisible = false
+                    onOpenCropEditor()
+                },
                 onClose = { settingsVisible = false },
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .weight(1f),
             )
         } else {
-            CompactActivityHeader(
-                isScummVMConnected = connectionDiagnostics.isConnected,
-                diagnosticsVisible = diagnosticsVisible,
-                onOpenSettings = {
-                    diagnosticsVisible = false
-                    settingsVisible = true
-                },
-                onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
-                onRestoreTrackpad = onRestoreTrackpad,
-            )
-
-            MirrorPrototypePanel(
-                status = mirrorOutputStatus,
-                onViewAvailable = onMirrorViewAvailable,
-                onViewDisposed = onMirrorViewDisposed,
-            )
-
-            TouchSurface(
-                touchState = touchState,
-                gestureResetGeneration = gestureResetGeneration,
-                touchProvenance = touchProvenance,
-                pointerSpeed = pointerSpeed,
-                onGesture = onGesture,
-                onGestureDiagnostic = onGestureDiagnostic,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .padding(vertical = 6.dp),
-            )
-
-            if (diagnosticsVisible) {
-                MouseDiagnosticsPanel(
-                    diagnostics = mouseDiagnostics,
-                    displayId = displayId,
-                    connectionDiagnostics = connectionDiagnostics,
-                    onRestoreBothScreens = onRestoreBothScreens,
-                )
+            val interfaceAspectRatio = mirrorSourceGeometry?.let { geometry ->
+                cropProfile.takeIf { it.isCompatibleWith(geometry) }
+                    ?.split
+                    ?.let { split ->
+                        val cropAspect = geometry.aspectRatio / (1f - split.ratio)
+                        if (geometry.orientation.swapsDimensions) 1f / cropAspect else cropAspect
+                    }
             }
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val desiredInterfaceHeight = interfaceAspectRatio
+                    ?.takeIf { interfacePanelVisible && it.isFinite() && it > 0f }
+                    ?.let { maxWidth / it }
+                    ?: 0.dp
+                val maximumInterfaceHeight = (maxHeight - NormalLayoutReservedHeight).coerceAtLeast(0.dp)
+                val interfaceHeight = minOf(desiredInterfaceHeight, maximumInterfaceHeight)
+                Column(Modifier.fillMaxSize()) {
+                    if (interfacePanelVisible) {
+                        MirrorPrototypePanel(
+                            status = mirrorOutputStatus,
+                            panelHeight = interfaceHeight,
+                            crop = cropProfile.crop,
+                            geometry = mirrorSourceGeometry,
+                            cursorState = mirrorCursorState,
+                            cropGeneration = activeCropGeneration,
+                            displayMode = displayMode,
+                            onViewAvailable = onMirrorViewAvailable,
+                            onViewDisposed = onMirrorViewDisposed,
+                        )
+                    }
 
-            MouseButtonControls(
-                diagnostics = mouseDiagnostics,
-                onButtonDown = onButtonDown,
-                onButtonUp = onButtonUp,
-            )
+                    TouchSurface(
+                        touchState = touchState,
+                        gestureResetGeneration = gestureResetGeneration,
+                        touchProvenance = touchProvenance,
+                        pointerSpeed = pointerSpeed,
+                        onGesture = onGesture,
+                        onGestureDiagnostic = onGestureDiagnostic,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .heightIn(min = MinimumNormalTrackpadHeight)
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                    )
+
+                    if (diagnosticsVisible) {
+                        MouseDiagnosticsPanel(
+                            diagnostics = mouseDiagnostics,
+                            displayId = displayId,
+                            connectionDiagnostics = connectionDiagnostics,
+                            mirrorCropDiagnostics = MirrorCropDiagnostics(
+                                geometry = mirrorSourceGeometry,
+                                profile = cropProfile,
+                                acknowledgement = lastCropAcknowledgement,
+                                displayMode = displayMode,
+                                displayModePreferences = displayModePreferences,
+                                upperAcknowledgement = lastUpperPresentationAcknowledgement,
+                            ),
+                            onRestoreBothScreens = onRestoreBothScreens,
+                        )
+                    }
+
+                    MouseButtonControls(
+                        diagnostics = mouseDiagnostics,
+                        onButtonDown = onButtonDown,
+                        onButtonUp = onButtonUp,
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                    )
+                    CompactActivityHeader(
+                        isScummVMConnected = connectionDiagnostics.isConnected,
+                        diagnosticsVisible = diagnosticsVisible,
+                        onOpenSettings = {
+                            diagnosticsVisible = false
+                            settingsVisible = true
+                        },
+                        onToggleDiagnostics = { diagnosticsVisible = !diagnosticsVisible },
+                        onRestoreTrackpad = onRestoreTrackpad,
+                    )
+                }
+            }
         }
     }
 }
@@ -651,57 +1216,70 @@ private fun AdventurePadScreen(
 @Composable
 private fun MirrorPrototypePanel(
     status: MirrorOutputStatus,
-    onViewAvailable: (MirrorSurfaceView) -> Unit,
-    onViewDisposed: (MirrorSurfaceView) -> Unit,
+    panelHeight: androidx.compose.ui.unit.Dp,
+    crop: NormalizedCrop,
+    geometry: MirrorSourceGeometry?,
+    cursorState: MirrorCursorState,
+    cropGeneration: Long,
+    displayMode: DisplayMode,
+    onViewAvailable: (MirrorHost) -> Unit,
+    onViewDisposed: (MirrorHost) -> Unit,
 ) {
     val context = LocalContext.current
-    val mirrorView = remember(context) { MirrorSurfaceView(context).apply { alpha = 0f } }
+    val mirrorHost = remember(context) { createMirrorHost(context) }
+    var panelWidth by remember { mutableStateOf(0) }
+    var panelHeightPixels by remember { mutableStateOf(0) }
 
-    DisposableEffect(mirrorView) {
-        onViewAvailable(mirrorView)
-        onDispose { onViewDisposed(mirrorView) }
+    DisposableEffect(mirrorHost) {
+        onViewAvailable(mirrorHost)
+        onDispose { onViewDisposed(mirrorHost) }
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 6.dp)
-            .background(TouchSurfaceBackground)
-            .border(1.dp, TouchSurfaceBorder)
-            .padding(6.dp),
+            .height(panelHeight)
+            .background(Color.Black)
+            .onSizeChanged {
+                panelWidth = it.width
+                panelHeightPixels = it.height
+            },
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = "LIVE INTERFACE PANEL — PROTOTYPE",
-                color = PrimaryText,
-                fontWeight = FontWeight.Medium,
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.weight(1f),
-            )
-            Text(
-                text = status.state.label,
-                color = if (status.state == MirrorOutputState.SUPPORTED) PrimaryText else SecondaryText,
-                style = MaterialTheme.typography.labelMedium,
-                maxLines = 1,
-            )
+        val panelGeometry = geometry?.let {
+            lowerPanelGeometry(panelWidth, panelHeightPixels, crop, it.width, it.height, it.orientation)
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(112.dp)
-                .padding(top = 4.dp)
-                .background(Color.Black),
-        ) {
-            AndroidView(
-                factory = { mirrorView },
-                update = { view ->
-                    view.alpha = if (status.state.shouldShowLiveSurface) 1f else 0f
-                },
-                modifier = Modifier.fillMaxSize(),
-            )
+        AndroidView(
+            factory = { mirrorHost.view },
+            update = {
+                mirrorHost.configureDirectTouch(
+                    crop = crop,
+                    geometry = geometry,
+                    cropGeneration = cropGeneration,
+                    enabled = displayMode == DisplayMode.INTERFACE &&
+                        status.state == MirrorOutputState.SUPPORTED,
+                )
+            },
+            modifier = Modifier.fillMaxSize(),
+        )
+        val cursorPoint = cursorState
+            .takeIf { it.visible && it.geometryGeneration == geometry?.generation }
+            ?.point
+            ?.let { panelGeometry?.mapSource(it) }
+        if (cursorPoint != null) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val center = Offset(cursorPoint.x, cursorPoint.y)
+                val radius = 7.dp.toPx()
+                val gap = 2.dp.toPx()
+                val stroke = 1.dp.toPx()
+                drawLine(Color.Black, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke + 2f)
+                drawLine(Color.Black, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke + 2f)
+                drawLine(Color.Black, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke + 2f)
+                drawLine(Color.Black, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke + 2f)
+                drawLine(PrimaryText, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke)
+                drawLine(PrimaryText, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke)
+                drawLine(PrimaryText, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke)
+                drawLine(PrimaryText, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke)
+            }
         }
     }
 }
@@ -710,16 +1288,22 @@ private fun MirrorPrototypePanel(
 private fun PointerSpeedSettings(
     pointerSpeed: PointerSpeed,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
+    displayModePreferences: DisplayModePreferences,
+    displayMode: DisplayMode,
+    upperExpansionSupported: Boolean,
+    onPreferredDisplayModeChanged: (DisplayMode) -> Unit,
+    cropConfigurationEnabled: Boolean,
+    onConfigureCrop: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    Column(
+    AdventurePadScrollablePage(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .background(TouchSurfaceBackground)
-            .border(2.dp, TouchSurfaceBorder)
-            .padding(16.dp),
+            .border(2.dp, TouchSurfaceBorder),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Row(
@@ -727,7 +1311,7 @@ private fun PointerSpeedSettings(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = "Pointer speed",
+                text = "SETTINGS",
                 color = PrimaryText,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleLarge,
@@ -779,8 +1363,211 @@ private fun PointerSpeedSettings(
                 }
             }
         }
+        Text(
+            text = "Default Mode",
+            color = PrimaryText,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DisplayMode.entries.forEach { mode ->
+                OutlinedButton(
+                    onClick = { onPreferredDisplayModeChanged(mode) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (displayModePreferences.preferredMode == mode) {
+                            ButtonPressedBackground
+                        } else {
+                            Color.Transparent
+                        },
+                        contentColor = PrimaryText,
+                    ),
+                    border = BorderStroke(1.dp, TouchSurfaceBorder),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Text(if (mode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD")
+                }
+            }
+        }
+        Text(
+            text = "Current mode: ${if (displayMode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD"}",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = "Shortcut: double-tap with two fingers on the trackpad",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Text(
+            text = "Shortcut: L2 + R2",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (!upperExpansionSupported) {
+            Text(
+                text = "Set a valid split to enable Split View Mode.",
+                color = SecondaryText,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        OutlinedButton(
+            onClick = onConfigureCrop,
+            enabled = cropConfigurationEnabled,
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
+            border = BorderStroke(1.dp, TouchSurfaceBorder),
+        ) {
+            Text("CONFIGURE SPLIT VIEW")
+        }
     }
 }
+
+@Composable
+private fun MirrorCropEditor(
+    model: CropEditorModel,
+    cropNeedsReview: Boolean,
+    savePending: Boolean,
+    onModelChanged: (CropEditorModel) -> Unit,
+    onSave: () -> Unit,
+    onCancel: () -> Unit,
+    onViewAvailable: (MirrorHost) -> Unit,
+    onViewDisposed: (MirrorHost) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val context = LocalContext.current
+    val mirrorHost = remember(context) { createMirrorHost(context) }
+    var viewportHeight by remember { mutableStateOf(1) }
+    val latestModel by rememberUpdatedState(model)
+
+    DisposableEffect(mirrorHost) {
+        onViewAvailable(mirrorHost)
+        onDispose { onViewDisposed(mirrorHost) }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .background(TouchSurfaceBackground)
+            .border(2.dp, TouchSurfaceBorder)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "CONFIGURE SPLIT VIEW",
+                color = PrimaryText,
+                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f),
+            )
+            CropEditorButton("Cancel", onCancel)
+            CropEditorButton(
+                text = if (savePending) "Saving…" else "Save",
+                onClick = onSave,
+                enabled = !savePending,
+            )
+        }
+        Text(
+            "Drag the horizontal line to choose where the game ends and Split View begins.",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(model.sourceAspectRatio)
+                .background(Color.Black)
+                .border(3.dp, PrimaryText)
+                .onSizeChanged { size ->
+                    viewportHeight = size.height.coerceAtLeast(1)
+                }
+                .pointerInput(viewportHeight) {
+                    detectVerticalDragGestures { change, dragAmount ->
+                        change.consume()
+                        onModelChanged(latestModel.withSplitRatio(
+                            latestModel.split.ratio + dragAmount / viewportHeight,
+                        ))
+                    }
+                },
+        ) {
+            AndroidView(
+                factory = { mirrorHost.view },
+                update = {},
+                modifier = Modifier.fillMaxSize(),
+            )
+            Canvas(Modifier.fillMaxSize()) {
+                val splitY = size.height * model.split.ratio
+                drawRect(
+                    color = Color.Black.copy(alpha = 0.25f),
+                    topLeft = Offset(0f, splitY),
+                    size = androidx.compose.ui.geometry.Size(size.width, size.height - splitY),
+                )
+                drawLine(
+                    color = PrimaryText,
+                    start = Offset(0f, splitY),
+                    end = Offset(size.width, splitY),
+                    strokeWidth = 6f,
+                )
+                drawLine(
+                    color = Color.Black,
+                    start = Offset(0f, splitY + 7f),
+                    end = Offset(size.width, splitY + 7f),
+                    strokeWidth = 2f,
+                )
+            }
+            Text(
+                text = "GAME",
+                color = PrimaryText,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+            )
+            Text(
+                text = "SPLIT VIEW",
+                color = PrimaryText,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+            )
+        }
+        if (cropNeedsReview) {
+            Text("Crop needs review", color = SecondaryText, style = MaterialTheme.typography.bodySmall)
+        }
+        Text(
+            "Split: ${(model.split.ratio * 100f).formatOneDecimal()}% • " +
+                "Split View: ${((1f - model.split.ratio) * 100f).formatOneDecimal()}%",
+            color = SecondaryText,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            CropEditorButton("RESET", { onModelChanged(model.reset()) }, Modifier.weight(1f))
+            CropEditorButton("↑", { onModelChanged(model.nudgeUp()) }, Modifier.weight(1f))
+            CropEditorButton("↓", { onModelChanged(model.nudgeDown()) }, Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun CropEditorButton(
+    text: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        enabled = enabled,
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
+        border = BorderStroke(1.dp, TouchSurfaceBorder),
+        modifier = modifier,
+    ) {
+        Text(text, maxLines = 1, style = MaterialTheme.typography.labelSmall)
+    }
+}
+
+private fun Float.formatOneDecimal(): String = String.format(Locale.ROOT, "%.1f", this)
 
 @Composable
 private fun CompactActivityHeader(
@@ -791,19 +1578,13 @@ private fun CompactActivityHeader(
     onRestoreTrackpad: () -> Unit,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            text = "AdventurePad",
-            color = PrimaryText,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleLarge,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
         ConnectionIndicator(isConnected = isScummVMConnected)
+        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         TextButton(
             onClick = onOpenSettings,
             colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
@@ -2241,9 +3022,10 @@ private fun MouseButtonControls(
     diagnostics: MouseDiagnostics,
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .padding(top = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2319,6 +3101,7 @@ private fun MouseDiagnosticsPanel(
     diagnostics: MouseDiagnostics,
     displayId: Int,
     connectionDiagnostics: ScummVMConnectionDiagnostics,
+    mirrorCropDiagnostics: MirrorCropDiagnostics,
     onRestoreBothScreens: () -> Unit,
 ) {
     Column(
@@ -2378,6 +3161,37 @@ private fun MouseDiagnosticsPanel(
             )
         }
         DiagnosticValue(value = "BUTTON SOURCES: ${diagnostics.activeMouseButtonSources}")
+        val geometry = mirrorCropDiagnostics.geometry
+        val profile = mirrorCropDiagnostics.profile
+        val pixelCrop = geometry?.let { profile.crop.toPixels(it.width, it.height) }
+        DiagnosticValue(
+            value = "MIRROR SOURCE: ${geometry?.let { "${it.width}×${it.height}" } ?: "UNKNOWN"} • " +
+                "CAPABILITY: ${geometry?.rendererCapability ?: 0} • GEOMETRY GEN: ${geometry?.generation ?: 0}",
+        )
+        DiagnosticValue(
+            value = "CROP: ${profile.crop.toDiagnosticString()} • " +
+                "PIXELS: ${pixelCrop?.toDiagnosticString() ?: "UNKNOWN"} • " +
+                "SCHEMA: ${profile.schemaVersion} • CONFIRMED: ${profile.confirmed} • " +
+                "REVIEW REQUIRED: ${profile.requiresReview}",
+        )
+        mirrorCropDiagnostics.acknowledgement?.let { acknowledgement ->
+            DiagnosticValue(
+                value = "LAST CROP ACK: ${acknowledgement.result.name} • " +
+                    "CROP GEN: ${acknowledgement.cropGeneration} • " +
+                    "GEOMETRY GEN: ${acknowledgement.geometryGeneration} • ${acknowledgement.diagnostic}",
+            )
+        }
+        DiagnosticValue(
+            value = "DISPLAY MODE: ${mirrorCropDiagnostics.displayMode.name} • " +
+                "PREFERRED: ${mirrorCropDiagnostics.displayModePreferences.preferredMode.name}",
+        )
+        mirrorCropDiagnostics.upperAcknowledgement?.let { acknowledgement ->
+            DiagnosticValue(
+                value = "LAST UPPER ACK: ${acknowledgement.result.name} • " +
+                    "MODE GEN: ${acknowledgement.modeGeneration} • " +
+                    "GEOMETRY GEN: ${acknowledgement.geometryGeneration} • ${acknowledgement.diagnostic}",
+            )
+        }
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -2398,6 +3212,27 @@ private fun MouseDiagnosticsPanel(
         }
     }
 }
+
+private data class MirrorCropDiagnostics(
+    val geometry: MirrorSourceGeometry?,
+    val profile: MirrorCropProfile,
+    val acknowledgement: CropAcknowledgement?,
+    val displayMode: DisplayMode,
+    val displayModePreferences: DisplayModePreferences,
+    val upperAcknowledgement: UpperPresentationAcknowledgement?,
+)
+
+
+private fun NormalizedCrop.toDiagnosticString(): String = String.format(
+    Locale.ROOT,
+    "%.4f,%.4f–%.4f,%.4f",
+    left,
+    top,
+    right,
+    bottom,
+)
+
+private fun PixelCrop.toDiagnosticString(): String = "$left,$top–$right,$bottom"
 
 @Composable
 private fun DiagnosticValue(
@@ -2488,6 +3323,8 @@ private val SecondaryText = Color(0xFFB8BDC4)
 private val MarkerColor = Color(0xFFD9DDE2)
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
+private val MinimumNormalTrackpadHeight = 120.dp
+private val NormalLayoutReservedHeight = 252.dp
 private const val MaxMoveEventCount = 999_999
 private const val AdventurePadBridgeTag = "AdventurePadBridge"
 private const val RAW_TOUCH_TAG = "AdventurePadRawTouch"

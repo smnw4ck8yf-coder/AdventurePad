@@ -1,27 +1,28 @@
 package com.jamesmoran.adventurepad
 
 import android.content.Context
-import android.graphics.PixelFormat
+import android.graphics.SurfaceTexture
 import android.util.AttributeSet
 import android.util.Log
 import android.view.Display
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.MotionEvent
+import android.view.Surface
+import android.view.TextureView
 import android.view.ViewConfiguration
 import java.util.concurrent.atomic.AtomicLong
 
-/** Producer surface with direct touch mapped into ScummVM virtual-source coordinates. */
-internal class MirrorSurfaceView @JvmOverloads constructor(
+/** TextureView-backed producer surface for the lower mirror A/B experiment. */
+internal class MirrorTextureView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
-) : SurfaceView(context, attrs), SurfaceHolder.Callback {
+) : TextureView(context, attrs), TextureView.SurfaceTextureListener, MirrorHost {
     private val generations = MirrorSurfaceGenerationState(MirrorSurfaceGenerations::next)
     private val attachmentGate = MirrorAttachmentGate()
     private var lifecycleActive = false
     private var mirrorRequired = false
     private var messengerConnected = false
     private var currentDisplayId = Display.INVALID_DISPLAY
+    private var mirrorSurface: Surface? = null
     private var surfaceWidth = 0
     private var surfaceHeight = 0
     private var surfaceAvailable = false
@@ -29,7 +30,6 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
     private var attachmentSent = false
     private var disposed = false
     private var lastEligibilityDiagnostic: String? = null
-    private var initializationLogCount = 0
     private var directTouchGeometry: LowerPanelGeometry? = null
     private var directTouchCrop: NormalizedCrop? = null
     private var directTouchSourceGeometry: MirrorSourceGeometry? = null
@@ -41,16 +41,19 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
     private var lastSourcePoint: SourcePoint? = null
     private val touchTracker = LowerPanelTouchTracker(ViewConfiguration.get(context).scaledTouchSlop.toFloat())
 
+    override val view get() = this
+
     init {
+        isOpaque = true
         isClickable = true
         isFocusable = false
         isFocusableInTouchMode = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
-        holder.setFormat(PixelFormat.OPAQUE)
-        holder.addCallback(this)
+        surfaceTextureListener = this
+        log("host created isAvailable=$isAvailable")
     }
 
-    fun configureDirectTouch(
+    override fun configureDirectTouch(
         crop: NormalizedCrop?,
         geometry: MirrorSourceGeometry?,
         cropGeneration: Long,
@@ -70,76 +73,87 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
         if (!directTouchEnabled) cancelDirectTouch()
     }
 
-    fun activate(displayId: Int) {
+    override fun activate(displayId: Int) {
         if (disposed) return
         mirrorRequired = true
         lifecycleActive = true
         messengerConnected = ScummVMInputClient.isConnected()
         currentDisplayId = displayId
-        observeValidSurfaceIfNeeded()
-        updateSurfaceSizeFromAuthoritativeSources(0, 0)
+        log("activate isAvailable=$isAvailable surfaceValid=${mirrorSurface?.isValid == true}")
         reconcileAttachment("activate")
     }
 
-    fun refreshAttachment(displayId: Int) {
+    override fun refreshAttachment(displayId: Int) {
         if (!lifecycleActive || disposed) return
         currentDisplayId = displayId
         messengerConnected = ScummVMInputClient.isConnected()
-        detachCurrentGeneration()
-        reconcileAttachment("connection refresh")
+        detachCurrentGeneration("reconnect")
+        reconcileAttachment("reconnect attach")
     }
 
-    fun ownsGeneration(generation: Long): Boolean =
+    override fun ownsGeneration(generation: Long): Boolean =
         generation > 0 && generations.activeGeneration == generation
 
-
-    fun deactivate() {
+    override fun deactivate() {
         mirrorRequired = false
         lifecycleActive = false
-        detachCurrentGeneration()
+        detachCurrentGeneration("deactivate")
         logEligibility("deactivate")
     }
 
-    fun dispose() {
+    override fun dispose() {
         if (disposed) return
         deactivate()
         disposed = true
-        holder.removeCallback(this)
+        surfaceTextureListener = null
+        releaseJavaSurface("dispose")
     }
 
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        if (!surfaceAvailable) {
-            surfaceAvailable = true
-            surfaceEpoch += 1
-        }
-        logInitialization(
-            "Surface created epoch=$surfaceEpoch valid=${holder.surface.isValid} " +
-                "view=${width}x$height frame=${holder.surfaceFrame.width()}x${holder.surfaceFrame.height()}",
-        )
-        updateSurfaceSizeFromAuthoritativeSources(0, 0)
-        reconcileAttachment("surfaceCreated")
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        updateSurfaceSizeFromAuthoritativeSources(width, height)
+    override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+        if (disposed) return
+        detachCurrentGeneration("replacement surface")
+        releaseJavaSurface("replacement surface")
+        mirrorSurface = Surface(surfaceTexture)
+        surfaceAvailable = true
+        surfaceEpoch += 1
+        updateSurfaceSize(width, height)
         rebuildDirectTouchGeometry()
-        logInitialization(
-            "Surface changed epoch=$surfaceEpoch valid=${holder.surface.isValid} " +
-                "size=${surfaceWidth}x$surfaceHeight format=$format",
+        log(
+            "surface available dimensions=${surfaceWidth}x$surfaceHeight epoch=$surfaceEpoch " +
+                "isAvailable=$isAvailable surfaceValid=${mirrorSurface?.isValid == true}",
         )
-        reconcileAttachment("surfaceChanged")
+        reconcileAttachment("surface available")
     }
+
+    override fun onSurfaceTextureSizeChanged(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
+        updateSurfaceSize(width, height)
+        rebuildDirectTouchGeometry()
+        log(
+            "surface size changed dimensions=${surfaceWidth}x$surfaceHeight epoch=$surfaceEpoch " +
+                "surfaceValid=${mirrorSurface?.isValid == true}",
+        )
+        // The Surface remains backed by the same SurfaceTexture; the existing generation stays attached.
+        reconcileAttachment("surface size changed")
+    }
+
+    override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
+        cancelDirectTouch(sendCancel = true)
+        log("surface destroyed epoch=$surfaceEpoch generation=${generations.activeGeneration}")
+        detachCurrentGeneration("surface destroyed")
+        surfaceAvailable = false
+        surfaceWidth = 0
+        surfaceHeight = 0
+        releaseJavaSurface("surface destroyed")
+        logEligibility("surface destroyed")
+        // TextureView retains ownership and may release the SurfaceTexture after this callback.
+        return true
+    }
+
+    override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
 
     override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
         super.onSizeChanged(width, height, oldWidth, oldHeight)
-        observeValidSurfaceIfNeeded()
-        updateSurfaceSizeFromAuthoritativeSources(width, height)
         rebuildDirectTouchGeometry()
-        logInitialization(
-            "View size changed epoch=$surfaceEpoch ${oldWidth}x$oldHeight -> " +
-                "${surfaceWidth}x$surfaceHeight",
-        )
-        reconcileAttachment("onSizeChanged")
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -200,14 +214,62 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
         return true
     }
 
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
+    private fun reconcileAttachment(reason: String) {
+        val surface = mirrorSurface
+        val eligibility = MirrorAttachmentEligibility(
+            mirrorRequired = mirrorRequired,
+            lifecycleActive = lifecycleActive && !disposed,
+            messengerConnected = messengerConnected,
+            surfaceAvailable = surfaceAvailable,
+            surfaceValid = surface?.isValid == true,
+            width = surfaceWidth,
+            height = surfaceHeight,
+            surfaceEpoch = surfaceEpoch,
+        )
+        logEligibility(reason, eligibility)
+        if (surface == null || !attachmentGate.shouldAttach(eligibility)) return
+
+        val generation = generations.beginAttachment()
+        val sent = ScummVMInputClient.attachMirrorSurface(
+            surface = surface,
+            generation = generation,
+            width = surfaceWidth,
+            height = surfaceHeight,
+            displayId = currentDisplayId,
+        )
+        if (sent) {
+            attachmentSent = true
+            attachmentGate.markRequested(surfaceEpoch)
+            log("ATTACH sent dimensions=${surfaceWidth}x$surfaceHeight generation=$generation epoch=$surfaceEpoch reason=$reason")
+        } else {
+            generations.invalidate()
+            attachmentSent = false
+            log("ATTACH not sent generation=$generation epoch=$surfaceEpoch reason=$reason")
+        }
+    }
+
+    private fun detachCurrentGeneration(reason: String) {
         cancelDirectTouch(sendCancel = true)
-        logInitialization("Surface destroyed epoch=$surfaceEpoch")
-        detachCurrentGeneration()
-        surfaceAvailable = false
-        surfaceWidth = 0
-        surfaceHeight = 0
-        logEligibility("surfaceDestroyed")
+        val generation = generations.invalidate()
+        if (generation != null && attachmentSent) {
+            ScummVMInputClient.detachMirrorSurface(generation)
+            log("DETACH sent generation=$generation epoch=$surfaceEpoch reason=$reason")
+        }
+        attachmentSent = false
+        attachmentGate.invalidate()
+    }
+
+    private fun updateSurfaceSize(callbackWidth: Int, callbackHeight: Int) {
+        surfaceWidth = callbackWidth.takeIf { it > 0 } ?: width.coerceAtLeast(0)
+        surfaceHeight = callbackHeight.takeIf { it > 0 } ?: height.coerceAtLeast(0)
+    }
+
+    private fun rebuildDirectTouchGeometry() {
+        val crop = directTouchCrop
+        val geometry = directTouchSourceGeometry
+        directTouchGeometry = if (directTouchEnabled && crop != null && geometry != null) {
+            lowerPanelGeometry(width, height, crop, geometry.width, geometry.height, geometry.orientation)
+        } else null
     }
 
     private fun sendPointer(point: SourcePoint, action: AbsoluteSourcePointerAction) {
@@ -221,14 +283,6 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
             ),
             activePointerId,
         )
-    }
-
-    private fun rebuildDirectTouchGeometry() {
-        val crop = directTouchCrop
-        val geometry = directTouchSourceGeometry
-        directTouchGeometry = if (directTouchEnabled && crop != null && geometry != null) {
-            lowerPanelGeometry(width, height, crop, geometry.width, geometry.height, geometry.orientation)
-        } else null
     }
 
     private fun cancelDirectTouch(sendCancel: Boolean = false) {
@@ -245,75 +299,12 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
         lastSourcePoint = null
     }
 
-    private fun reconcileAttachment(reason: String) {
-        val surface = holder.surface
-        val eligibility = MirrorAttachmentEligibility(
-            mirrorRequired = mirrorRequired,
-            lifecycleActive = lifecycleActive && !disposed,
-            messengerConnected = messengerConnected,
-            surfaceAvailable = surfaceAvailable,
-            surfaceValid = surface.isValid,
-            width = surfaceWidth,
-            height = surfaceHeight,
-            surfaceEpoch = surfaceEpoch,
-        )
-        logEligibility(reason, eligibility)
-        if (!attachmentGate.shouldAttach(eligibility)) {
-            if (eligibility.canAttach && attachmentGate.requestedSurfaceEpoch == surfaceEpoch) {
-                logInitialization("ATTACH suppressed epoch=$surfaceEpoch reason=already requested")
-            }
-            return
-        }
-
-        val generation = generations.beginAttachment()
-        val sent = ScummVMInputClient.attachMirrorSurface(
-            surface = surface,
-            generation = generation,
-            width = surfaceWidth,
-            height = surfaceHeight,
-            displayId = currentDisplayId,
-        )
-        if (sent) {
-            attachmentSent = true
-            attachmentGate.markRequested(surfaceEpoch)
-            logInitialization(
-                "ATTACH sent epoch=$surfaceEpoch generation=$generation reason=$reason",
-            )
-        } else {
-            generations.invalidate()
-            attachmentSent = false
-            logInitialization(
-                "ATTACH not sent epoch=$surfaceEpoch generation=$generation reason=$reason",
-            )
-        }
-    }
-
-    private fun detachCurrentGeneration() {
-        cancelDirectTouch(sendCancel = true)
-        val generation = generations.invalidate() ?: return
-        if (attachmentSent) {
-            ScummVMInputClient.detachMirrorSurface(generation)
-            logInitialization("DETACH generation=$generation epoch=$surfaceEpoch")
-        }
-        attachmentSent = false
-        attachmentGate.invalidate()
-    }
-
-    private fun updateSurfaceSizeFromAuthoritativeSources(callbackWidth: Int, callbackHeight: Int) {
-        val frame = holder.surfaceFrame
-        surfaceWidth = callbackWidth.takeIf { it > 0 }
-            ?: frame.width().takeIf { it > 0 }
-            ?: width.coerceAtLeast(0)
-        surfaceHeight = callbackHeight.takeIf { it > 0 }
-            ?: frame.height().takeIf { it > 0 }
-            ?: height.coerceAtLeast(0)
-    }
-
-    private fun observeValidSurfaceIfNeeded() {
-        if (surfaceAvailable || !holder.surface.isValid) return
-        surfaceAvailable = true
-        surfaceEpoch += 1
-        logInitialization("Valid Surface observed outside creation callback epoch=$surfaceEpoch")
+    private fun releaseJavaSurface(reason: String) {
+        val surface = mirrorSurface ?: return
+        val wasValid = surface.isValid
+        surface.release()
+        mirrorSurface = null
+        log("Surface released epoch=$surfaceEpoch wasValid=$wasValid reason=$reason")
     }
 
     private fun logEligibility(
@@ -323,7 +314,7 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
             lifecycleActive = lifecycleActive && !disposed,
             messengerConnected = messengerConnected,
             surfaceAvailable = surfaceAvailable,
-            surfaceValid = holder.surface.isValid,
+            surfaceValid = mirrorSurface?.isValid == true,
             width = surfaceWidth,
             height = surfaceHeight,
             surfaceEpoch = surfaceEpoch,
@@ -331,22 +322,18 @@ internal class MirrorSurfaceView @JvmOverloads constructor(
     ) {
         val diagnostic = "required=${eligibility.mirrorRequired} lifecycle=${eligibility.lifecycleActive} " +
             "connected=${eligibility.messengerConnected} available=${eligibility.surfaceAvailable} " +
-            "valid=${eligibility.surfaceValid} size=${eligibility.width}x${eligibility.height} " +
+            "valid=${eligibility.surfaceValid} dimensions=${eligibility.width}x${eligibility.height} " +
             "epoch=${eligibility.surfaceEpoch} eligibility=${eligibility.blockingReason}"
         if (diagnostic == lastEligibilityDiagnostic) return
         lastEligibilityDiagnostic = diagnostic
-        logInitialization("ATTACH eligibility reason=$reason $diagnostic")
+        log("attachment eligibility reason=$reason $diagnostic")
     }
 
-    private fun logInitialization(message: String) {
-        if (initializationLogCount >= MAX_INITIALIZATION_LOGS) return
-        initializationLogCount += 1
-        Log.i(INITIALIZATION_TAG, "surfaceEvent=$initializationLogCount/$MAX_INITIALIZATION_LOGS $message")
+    private fun log(message: String) {
+        Log.i(MIRROR_HOST_LOG_TAG, "mode=TEXTURE_VIEW $message")
     }
 
     private companion object {
-        const val INITIALIZATION_TAG = "AdventurePadMirrorInit"
-        const val MAX_INITIALIZATION_LOGS = 48
         val nextPointerSequence = AtomicLong(android.os.SystemClock.elapsedRealtime().coerceAtLeast(1L))
     }
 }

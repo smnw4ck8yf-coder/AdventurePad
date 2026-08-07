@@ -56,7 +56,7 @@ internal interface PointerSpeedStore {
     suspend fun setPointerSpeed(pointerSpeed: PointerSpeed)
 }
 
-private val Context.pointerSpeedDataStore: DataStore<Preferences> by preferencesDataStore(
+internal val Context.adventurePadDataStore: DataStore<Preferences> by preferencesDataStore(
     name = "adventure_pad_settings",
 )
 
@@ -101,7 +101,7 @@ internal class PointerSpeedRepository(
     companion object {
         fun create(context: Context, scope: CoroutineScope): PointerSpeedRepository =
             PointerSpeedRepository(
-                store = DataStorePointerSpeedStore(context.applicationContext.pointerSpeedDataStore),
+                store = DataStorePointerSpeedStore(context.applicationContext.adventurePadDataStore),
                 scope = scope,
             )
     }
