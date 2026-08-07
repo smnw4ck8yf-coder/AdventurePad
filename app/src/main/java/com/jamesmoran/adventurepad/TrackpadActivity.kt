@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -51,6 +52,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEvent
@@ -61,6 +63,7 @@ import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -1148,7 +1151,7 @@ private fun AdventurePadScreen(
                 BoxWithConstraints(Modifier.fillMaxSize()) {
                     val desiredInterfaceHeight = interfaceAspectRatio
                         ?.takeIf { interfacePanelVisible && it.isFinite() && it > 0f }
-                        ?.let { maxWidth / it }
+                        ?.let { maxWidth / it * LOWER_PANEL_VERTICAL_SCALE }
                         ?: 0.dp
                     val maximumInterfaceHeight = (maxHeight - NormalLayoutReservedHeight).coerceAtLeast(0.dp)
                     val interfaceHeight = minOf(desiredInterfaceHeight, maximumInterfaceHeight)
@@ -1173,17 +1176,13 @@ private fun AdventurePadScreen(
                             pointerSpeed = pointerSpeed,
                             onGesture = onGesture,
                             onGestureDiagnostic = onGestureDiagnostic,
+                            onButtonDown = onButtonDown,
+                            onButtonUp = onButtonUp,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                                 .heightIn(min = MinimumNormalTrackpadHeight)
-                                .padding(horizontal = 12.dp, vertical = 4.dp),
-                        )
-                        MouseButtonControls(
-                            diagnostics = mouseDiagnostics,
-                            onButtonDown = onButtonDown,
-                            onButtonUp = onButtonUp,
-                            modifier = Modifier.padding(horizontal = 12.dp),
+                                .padding(horizontal = AdventurePadDesign.spacingMd, vertical = 3.dp),
                         )
                         GameplayUtilityBar(
                             isScummVMConnected = connectionDiagnostics.isConnected,
@@ -1207,55 +1206,63 @@ private fun AdventurePadScreen(
                         }
                     }
                 }
-            when (activePage) {
-                LowerScreenPage.COMPANION -> CompanionScreen(
-                    gameId = currentGameId,
-                    persistedNotes = persistedNotes,
-                    selectedSection = companionSection,
-                    statistics = CompanionStatistics(
-                        targetId = currentGameId,
-                        displayMode = displayMode,
-                        splitProfileConfigured = mirrorSourceGeometry?.let(cropProfile::isCompatibleWith) == true,
-                        notesPresent = persistedNotes.isNotBlank(),
-                    ),
-                    onNotesChanged = onNotesChanged,
-                    onSectionSelected = {
-                        navigate(LowerScreenNavigationAction.SelectCompanionSection(it))
-                    },
-                    onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
-                    modifier = blockingModifier,
-                )
-                LowerScreenPage.SETTINGS -> PointerSpeedSettings(
-                    pointerSpeed = pointerSpeed,
-                    onPointerSpeedSelected = onPointerSpeedSelected,
-                    displayModePreferences = displayModePreferences,
-                    displayMode = displayMode,
-                    upperExpansionSupported = upperExpansionSupported,
-                    onPreferredDisplayModeChanged = onPreferredDisplayModeChanged,
-                    cropConfigurationEnabled = mirrorSourceGeometry?.isSupported == true,
-                    onConfigureCrop = {
-                        navigate(LowerScreenNavigationAction.ClosePage)
-                        onOpenCropEditor()
-                    },
-                    diagnosticsVisible = diagnosticsVisible,
-                    onDiagnosticsVisibleChanged = { diagnosticsVisible = it },
-                    diagnostics = mouseDiagnostics,
-                    displayId = displayId,
-                    connectionDiagnostics = connectionDiagnostics,
-                    mirrorCropDiagnostics = MirrorCropDiagnostics(
-                        geometry = mirrorSourceGeometry,
-                        profile = cropProfile,
-                        acknowledgement = lastCropAcknowledgement,
-                        displayMode = displayMode,
+            Box(blockingModifier) {
+                val pageModifier = Modifier
+                    .fillMaxSize(LOWER_PAGE_FRACTION)
+                    .align(Alignment.Center)
+                    .clip(AdventurePadDesign.largeShape)
+                    .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape)
+                when (activePage) {
+                    LowerScreenPage.COMPANION -> CompanionScreen(
+                        gameId = currentGameId,
+                        persistedNotes = persistedNotes,
+                        selectedSection = companionSection,
+                        statistics = CompanionStatistics(
+                            targetId = currentGameId,
+                            displayMode = displayMode,
+                            splitProfileConfigured = mirrorSourceGeometry
+                                ?.let(cropProfile::isCompatibleWith) == true,
+                            notesPresent = persistedNotes.isNotBlank(),
+                        ),
+                        onNotesChanged = onNotesChanged,
+                        onSectionSelected = {
+                            navigate(LowerScreenNavigationAction.SelectCompanionSection(it))
+                        },
+                        onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
+                        modifier = pageModifier,
+                    )
+                    LowerScreenPage.SETTINGS -> PointerSpeedSettings(
+                        pointerSpeed = pointerSpeed,
+                        onPointerSpeedSelected = onPointerSpeedSelected,
                         displayModePreferences = displayModePreferences,
-                        upperAcknowledgement = lastUpperPresentationAcknowledgement,
-                    ),
-                    onRestoreTrackpad = onRestoreTrackpad,
-                    onRestoreBothScreens = onRestoreBothScreens,
-                    onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
-                    modifier = blockingModifier,
-                )
-                LowerScreenPage.GAMEPLAY -> Unit
+                        displayMode = displayMode,
+                        upperExpansionSupported = upperExpansionSupported,
+                        onPreferredDisplayModeChanged = onPreferredDisplayModeChanged,
+                        cropConfigurationEnabled = mirrorSourceGeometry?.isSupported == true,
+                        onConfigureCrop = {
+                            navigate(LowerScreenNavigationAction.ClosePage)
+                            onOpenCropEditor()
+                        },
+                        diagnosticsVisible = diagnosticsVisible,
+                        onDiagnosticsVisibleChanged = { diagnosticsVisible = it },
+                        diagnostics = mouseDiagnostics,
+                        displayId = displayId,
+                        connectionDiagnostics = connectionDiagnostics,
+                        mirrorCropDiagnostics = MirrorCropDiagnostics(
+                            geometry = mirrorSourceGeometry,
+                            profile = cropProfile,
+                            acknowledgement = lastCropAcknowledgement,
+                            displayMode = displayMode,
+                            displayModePreferences = displayModePreferences,
+                            upperAcknowledgement = lastUpperPresentationAcknowledgement,
+                        ),
+                        onRestoreTrackpad = onRestoreTrackpad,
+                        onRestoreBothScreens = onRestoreBothScreens,
+                        onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
+                        modifier = pageModifier,
+                    )
+                    LowerScreenPage.GAMEPLAY -> Unit
+                }
             }
         }
     }
@@ -1356,9 +1363,8 @@ private fun PointerSpeedSettings(
     AdventurePadScrollablePage(
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp)
             .background(TouchSurfaceBackground)
-            .border(2.dp, TouchSurfaceBorder),
+            .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1680,9 +1686,17 @@ private fun GameplayUtilityBar(
         TextButton(
             onClick = onOpenCompanion,
             colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
-            modifier = Modifier.heightIn(min = AdventurePadDesign.utilityTouchTarget),
+            modifier = Modifier
+                .heightIn(min = AdventurePadDesign.utilityTouchTarget)
+                .widthIn(min = 132.dp)
+                .background(AdventurePadDesign.surfaceRaised, AdventurePadDesign.mediumShape)
+                .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.mediumShape),
         ) {
-            Text(text = GameplayUtilityAction.COMPANION.label, maxLines = 1)
+            Text(
+                text = GameplayUtilityAction.COMPANION.displayLabel(),
+                maxLines = 1,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         ConnectionIndicator(isConnected = isScummVMConnected)
@@ -1690,9 +1704,17 @@ private fun GameplayUtilityBar(
         TextButton(
             onClick = onOpenSettings,
             colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
-            modifier = Modifier.heightIn(min = AdventurePadDesign.utilityTouchTarget),
+            modifier = Modifier
+                .heightIn(min = AdventurePadDesign.utilityTouchTarget)
+                .widthIn(min = 132.dp)
+                .background(AdventurePadDesign.surfaceRaised, AdventurePadDesign.mediumShape)
+                .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.mediumShape),
         ) {
-            Text(text = GameplayUtilityAction.SETTINGS.label, maxLines = 1)
+            Text(
+                text = GameplayUtilityAction.SETTINGS.displayLabel(),
+                maxLines = 1,
+                style = MaterialTheme.typography.labelLarge,
+            )
         }
     }
 }
@@ -1715,17 +1737,23 @@ private fun TouchSurface(
     pointerSpeed: PointerSpeed,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
     val currentPointerSpeed by rememberUpdatedState(pointerSpeed)
     val viewConfiguration = LocalViewConfiguration.current
     val androidViewConfiguration = ViewConfiguration.get(LocalContext.current)
+    val density = LocalDensity.current
+    val currentButtonDown by rememberUpdatedState(onButtonDown)
+    val currentButtonUp by rememberUpdatedState(onButtonUp)
 
     Box(
         modifier = modifier
+            .clip(AdventurePadDesign.largeShape)
             .background(TouchSurfaceBackground)
-            .border(2.dp, TouchSurfaceBorder)
+            .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape)
             .onSizeChanged { surfaceSize ->
                 touchState.value = touchState.value.withSurfaceSize(
                     surfaceWidth = surfaceSize.width.toFloat(),
@@ -1761,6 +1789,8 @@ private fun TouchSurface(
                     )
                     var holdJob: Job? = null
                     var activeSequenceToken: TouchSequenceToken? = null
+                    val inputOwnership = TrackpadInputOwnership()
+                    var buttonChordActive = false
                     val pointerInputScope = this
                     try {
                         awaitPointerEventScope {
@@ -1768,26 +1798,117 @@ private fun TouchSurface(
                                 val event = awaitPointerEvent(PointerEventPass.Initial)
                                 composeTouchDiagnostics.record(event)
                                 val motionEvent = event.motionEvent
-                                val pressedCount = event.changes.count { it.pressed }
-                                if (event.type == PointerEventType.Press && pressedCount == 1) {
-                                    val pointer = event.changes.first { it.pressed }
-                                    activeSequenceToken = touchProvenance.claimComposeDown(
-                                        generation = gestureResetGeneration,
-                                        downTimeMillis = motionEvent?.downTime,
-                                        pointerId = motionEvent?.let {
-                                            it.getPointerId(it.actionIndex)
-                                        } ?: pointer.id.value.toInt(),
-                                    )
+                                val overlayGeometry = calculateTrackpadOverlayGeometry(
+                                    width = size.width.toFloat(),
+                                    height = size.height.toFloat(),
+                                    minimumHeight = with(density) {
+                                        AdventurePadDesign.trackpadOverlayMinimumHeight.toPx()
+                                    },
+                                    maximumHeight = with(density) {
+                                        AdventurePadDesign.trackpadOverlayMaximumHeight.toPx()
+                                    },
+                                )
+                                event.changes
+                                    .filter { it.pressed && !it.previousPressed }
+                                    .forEach { pointer ->
+                                        overlayGeometry?.let { geometry ->
+                                            inputOwnership.begin(
+                                                pointerId = pointer.id.value,
+                                                position = pointer.position,
+                                                geometry = geometry,
+                                            )?.dispatch(currentButtonDown, currentButtonUp)
+                                        }
+                                    }
+                                val trackpadPointerIds = inputOwnership.trackpadPointerIds()
+                                val trackpadChanges = event.changes.filter {
+                                    it.id.value in trackpadPointerIds
+                                }
+                                val trackpadPressedCount = trackpadChanges.count { it.pressed }
+                                val trackpadEventType = when {
+                                    trackpadChanges.any { it.pressed && !it.previousPressed } ->
+                                        PointerEventType.Press
+                                    trackpadChanges.any { !it.pressed && it.previousPressed } ->
+                                        PointerEventType.Release
+                                    event.type == PointerEventType.Move -> PointerEventType.Move
+                                    event.type == PointerEventType.Unknown -> PointerEventType.Unknown
+                                    else -> null
+                                }
+                                if (inputOwnership.routesHeldLeftTrackpadMovement() &&
+                                    trackpadPressedCount > 0
+                                ) {
+                                    buttonChordActive = true
+                                }
+                                if (buttonChordActive) {
+                                    if (trackpadEventType != null && trackpadChanges.isNotEmpty()) {
+                                        touchState.value = handlePointerEvent(
+                                            eventType = trackpadEventType,
+                                            changes = trackpadChanges,
+                                            previousState = touchState.value,
+                                            surfaceWidth = size.width.toFloat(),
+                                            surfaceHeight = size.height.toFloat(),
+                                            allowMovement = true,
+                                            updateMovementBaseline = false,
+                                            resetMovementBaseline = false,
+                                            pointerSpeed = currentPointerSpeed,
+                                        )
+                                    }
+                                    event.changes
+                                        .filter { !it.pressed && it.previousPressed }
+                                        .forEach { pointer ->
+                                            inputOwnership.finish(pointer.id.value)?.dispatch(
+                                                currentButtonDown,
+                                                currentButtonUp,
+                                            )
+                                        }
+                                    if (inputOwnership.isEmpty()) buttonChordActive = false
+                                    event.changes.forEach(PointerInputChange::consume)
+                                    continue
+                                }
+                                val pressedCount = trackpadPressedCount
+                                if (trackpadEventType == PointerEventType.Press && pressedCount == 1 &&
+                                    activeSequenceToken == null &&
+                                    !inputOwnership.isButtonOwnedSequence()
+                                ) {
+                                    val pointer = trackpadChanges.first { it.pressed }
+                                    if (motionEvent?.actionMasked == MotionEvent.ACTION_DOWN) {
+                                        activeSequenceToken = touchProvenance.claimComposeDown(
+                                            generation = gestureResetGeneration,
+                                            downTimeMillis = motionEvent?.downTime,
+                                            pointerId = motionEvent?.let {
+                                                it.getPointerId(it.actionIndex)
+                                            } ?: pointer.id.value.toInt(),
+                                        )
+                                    }
                                 }
                                 val invalidSequenceDown =
-                                    event.type == PointerEventType.Press &&
+                                    trackpadEventType == PointerEventType.Press &&
                                         pressedCount == 1 &&
-                                        activeSequenceToken == null
-                                val terminalRelease = event.type == PointerEventType.Release &&
+                                        activeSequenceToken == null &&
+                                        !inputOwnership.isButtonOwnedSequence()
+                                val terminalRelease = trackpadEventType == PointerEventType.Release &&
                                     pressedCount == 0
                                 val platformCancel =
                                     motionEvent?.actionMasked == MotionEvent.ACTION_CANCEL
                                 val provenanceTerminal = terminalRelease || platformCancel
+                                if (inputOwnership.isButtonOwnedSequence()) {
+                                    event.changes
+                                        .filter { !it.pressed && it.previousPressed }
+                                        .forEach { pointer ->
+                                            inputOwnership.finish(pointer.id.value)?.dispatch(
+                                                currentButtonDown,
+                                                currentButtonUp,
+                                            )
+                                        }
+                                    event.changes.forEach(PointerInputChange::consume)
+                                    continue
+                                }
+                                if (trackpadEventType == null) {
+                                    event.changes
+                                        .filter { !it.pressed && it.previousPressed }
+                                        .forEach { inputOwnership.finish(it.id.value) }
+                                    event.changes.forEach(PointerInputChange::consume)
+                                    continue
+                                }
                                 val releaseVerdict = if (provenanceTerminal) {
                                     touchProvenance.validateComposeRelease(
                                         token = activeSequenceToken,
@@ -1818,7 +1939,7 @@ private fun TouchSurface(
                                         checkNotNull(releaseVerdict),
                                     )
                                 } else {
-                                    gestureTracker.handle(event, releaseVerdict)
+                                    gestureTracker.handle(event, releaseVerdict, trackpadChanges)
                                 }
                                 if (gestureUpdate.cancelHold) {
                                     val timerWasPending = holdJob != null
@@ -1853,7 +1974,8 @@ private fun TouchSurface(
                                     activeSequenceToken = null
                                 }
                                 val nextState = handlePointerEvent(
-                                    event = event,
+                                    eventType = trackpadEventType ?: event.type,
+                                    changes = trackpadChanges,
                                     previousState = touchState.value,
                                     surfaceWidth = size.width.toFloat(),
                                     surfaceHeight = size.height.toFloat(),
@@ -1863,6 +1985,9 @@ private fun TouchSurface(
                                     pointerSpeed = currentPointerSpeed,
                                 )
                                 touchState.value = nextState
+                                event.changes
+                                    .filter { !it.pressed && it.previousPressed }
+                                    .forEach { inputOwnership.finish(it.id.value) }
                                 event.changes.forEach(PointerInputChange::consume)
                             }
                         }
@@ -1891,6 +2016,9 @@ private fun TouchSurface(
                         val timerWasPending = holdJob != null
                         holdJob?.cancel()
                         holdJob = null
+                        inputOwnership.finishAll().forEach {
+                            it.dispatch(currentButtonDown, currentButtonUp)
+                        }
                         if (timerWasPending) {
                             onGestureDiagnostic("PENDING HOLD TIMER CANCELLED: LIFECYCLE RESET")
                         }
@@ -1909,6 +2037,22 @@ private fun TouchSurface(
             },
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val overlayGeometry = calculateTrackpadOverlayGeometry(
+                width = size.width,
+                height = size.height,
+                minimumHeight = AdventurePadDesign.trackpadOverlayMinimumHeight.toPx(),
+                maximumHeight = AdventurePadDesign.trackpadOverlayMaximumHeight.toPx(),
+            )
+            overlayGeometry?.let { geometry ->
+                val overlayTint = AdventurePadDesign.surfaceRaised.copy(alpha = 0.58f)
+                val separator = AdventurePadDesign.outline.copy(alpha = 0.72f)
+                drawRect(overlayTint, geometry.left.topLeft, geometry.left.size)
+                drawRect(overlayTint, geometry.right.topLeft, geometry.right.size)
+                drawLine(separator, geometry.left.topLeft, geometry.left.topRight, 1.dp.toPx())
+                drawLine(separator, geometry.right.topLeft, geometry.right.topRight, 1.dp.toPx())
+                drawLine(separator, geometry.left.topRight, geometry.left.bottomRight, 1.dp.toPx())
+                drawLine(separator, geometry.right.topLeft, geometry.right.bottomLeft, 1.dp.toPx())
+            }
             val radius = MarkerRadius.toPx()
             val unconstrainedCenter = if (currentState.cursorInitialized) {
                 Offset(currentState.cursorX, currentState.cursorY)
@@ -1932,7 +2076,36 @@ private fun TouchSurface(
             )
             drawCircle(MarkerColor, radius = radius, center = markerCenter)
         }
+        Text(
+            text = "Left",
+            color = SecondaryText,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = AdventurePadDesign.spacingLg, bottom = AdventurePadDesign.spacingMd),
+        )
+        Text(
+            text = "Right",
+            color = SecondaryText,
+            fontWeight = FontWeight.Medium,
+            style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = AdventurePadDesign.spacingLg, bottom = AdventurePadDesign.spacingMd),
+        )
     }
+}
+
+private fun TrackpadOverlayButtonTransition.dispatch(
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
+) {
+    val mouseButton = when (button) {
+        TrackpadOverlayButton.LEFT -> ScummVMMouseButton.LEFT
+        TrackpadOverlayButton.RIGHT -> ScummVMMouseButton.RIGHT
+    }
+    if (isDown) onButtonDown(mouseButton) else onButtonUp(mouseButton)
 }
 
 private class RawTouchDiagnostics {
@@ -2414,12 +2587,13 @@ internal class TrackpadGestureTracker(
     fun handle(
         event: PointerEvent,
         releaseVerdict: TouchReleaseVerdict? = null,
+        changes: List<PointerInputChange> = event.changes,
     ): GestureUpdate {
-        val pressedCount = event.changes.count { it.pressed }
+        val pressedCount = changes.count { it.pressed }
         when (event.type) {
             PointerEventType.Press -> {
                 if (state == GestureTrackingState.IDLE && pressedCount == 1) {
-                    val pointer = event.changes.first { it.pressed }
+                    val pointer = changes.first { it.pressed }
                     initialPositions[pointer.id] = pointer.position
                     downUptimeMillis = pointer.uptimeMillis
                     val previousTapPosition = lastTapPosition
@@ -2463,7 +2637,7 @@ internal class TrackpadGestureTracker(
                         state == GestureTrackingState.SECOND_TAP_HOLD_PENDING) &&
                     pressedCount == 2
                 ) {
-                    event.changes.filter { it.pressed }.forEach { pointer ->
+                    changes.filter { it.pressed }.forEach { pointer ->
                         initialPositions.putIfAbsent(pointer.id, pointer.position)
                     }
                     clearPreviousTap()
@@ -2481,7 +2655,7 @@ internal class TrackpadGestureTracker(
             PointerEventType.Move -> {
                 when (state) {
                     GestureTrackingState.SINGLE_PENDING -> {
-                        val pointer = event.changes.singleOrNull { it.pressed }
+                        val pointer = changes.singleOrNull { it.pressed }
                         val initialPosition = pointer?.let { initialPositions[it.id] }
                         if (pointer == null || initialPosition == null) return cancel()
                         if (pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared) {
@@ -2498,7 +2672,7 @@ internal class TrackpadGestureTracker(
                         }
                     }
                     GestureTrackingState.SECOND_TAP_HOLD_PENDING -> {
-                        val pointer = event.changes.singleOrNull { it.pressed }
+                        val pointer = changes.singleOrNull { it.pressed }
                         val initialPosition = pointer?.let { initialPositions[it.id] }
                         if (pointer == null || initialPosition == null) return cancel()
                         val diagnostics = if (pendingMovementReported) {
@@ -2531,8 +2705,8 @@ internal class TrackpadGestureTracker(
                         return cancel()
                     }
                     GestureTrackingState.TWO_FINGER_PENDING -> {
-                        if (pressedCount > 2 || hasPointerExceededTolerance(event)) return cancel()
-                        val elapsed = event.changes.maxOfOrNull { it.uptimeMillis }
+                        if (pressedCount > 2 || hasPointerExceededTolerance(changes)) return cancel()
+                        val elapsed = changes.maxOfOrNull { it.uptimeMillis }
                             ?.minus(downUptimeMillis) ?: 0L
                         if (elapsed > twoFingerTapMaximumDurationMillis) return cancel()
                     }
@@ -2544,7 +2718,7 @@ internal class TrackpadGestureTracker(
 
             PointerEventType.Release -> {
                 if (state == GestureTrackingState.TWO_FINGER_PENDING &&
-                    (hasPointerExceededTolerance(event) || event.changes.any {
+                    (hasPointerExceededTolerance(changes) || changes.any {
                         it.id !in initialPositions && (it.pressed || it.previousPressed)
                     })
                 ) {
@@ -2560,14 +2734,14 @@ internal class TrackpadGestureTracker(
                             ),
                         )
                     }
-                    val finalUptimeMillis = event.changes.maxOfOrNull { it.uptimeMillis }
+                    val finalUptimeMillis = changes.maxOfOrNull { it.uptimeMillis }
                         ?: downUptimeMillis
                     val duration = finalUptimeMillis - downUptimeMillis
                     val completedState = state
-                    val displacement = maximumDisplacement(event)
+                    val displacement = maximumDisplacement(changes)
                     val gesture = when (completedState) {
                         GestureTrackingState.SINGLE_PENDING -> {
-                            if (!hasPointerExceededTolerance(event) &&
+                            if (!hasPointerExceededTolerance(changes) &&
                                 duration in 0..singleTapMaximumDurationMillis
                             ) {
                                 lastTapUpUptimeMillis = finalUptimeMillis
@@ -2579,7 +2753,7 @@ internal class TrackpadGestureTracker(
                             }
                         }
                         GestureTrackingState.SECOND_TAP_HOLD_PENDING -> {
-                            if (!hasPointerExceededTolerance(event) &&
+                            if (!hasPointerExceededTolerance(changes) &&
                                 duration in 0..singleTapMaximumDurationMillis
                             ) {
                                 TrackpadGesture.SINGLE_TAP
@@ -2678,8 +2852,8 @@ internal class TrackpadGestureTracker(
     fun invalidateFromProvenance(verdict: TouchReleaseVerdict): GestureUpdate =
         rejectRelease(verdict)
 
-    private fun hasPointerExceededTolerance(event: PointerEvent): Boolean =
-        event.changes.any { pointer ->
+    private fun hasPointerExceededTolerance(changes: List<PointerInputChange>): Boolean =
+        changes.any { pointer ->
             val initialPosition = initialPositions[pointer.id]
             initialPosition == null ||
                 pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared
@@ -2688,7 +2862,7 @@ internal class TrackpadGestureTracker(
     private fun PointerInputChange.distanceSquaredFrom(position: Offset): Float =
         (this.position - position).getDistanceSquared()
 
-    private fun maximumDisplacement(event: PointerEvent): Float = event.changes.maxOfOrNull {
+    private fun maximumDisplacement(changes: List<PointerInputChange>): Float = changes.maxOfOrNull {
         val initialPosition = initialPositions[it.id] ?: return@maxOfOrNull Float.POSITIVE_INFINITY
         sqrt(it.distanceSquaredFrom(initialPosition))
     } ?: 0f
@@ -2779,7 +2953,8 @@ private fun KeyEvent.isFromGameController(): Boolean =
     isFromSource(InputDevice.SOURCE_GAMEPAD) || isFromSource(InputDevice.SOURCE_JOYSTICK)
 
 private fun handlePointerEvent(
-    event: PointerEvent,
+    eventType: PointerEventType,
+    changes: List<PointerInputChange>,
     previousState: TouchState,
     surfaceWidth: Float,
     surfaceHeight: Float,
@@ -2789,8 +2964,8 @@ private fun handlePointerEvent(
     pointerSpeed: PointerSpeed,
 ): TouchState {
     val state = previousState.withSurfaceSize(surfaceWidth, surfaceHeight)
-    val activePointerCount = event.changes.count { it.pressed }
-    val action = when (event.type) {
+    val activePointerCount = changes.count { it.pressed }
+    val action = when (eventType) {
         PointerEventType.Press -> if (state.pointerCount == 0) {
             TouchAction.DOWN
         } else {
@@ -2804,8 +2979,8 @@ private fun handlePointerEvent(
         }
         PointerEventType.Unknown -> if (
             state.trackedPointerId != null &&
-            event.changes.isNotEmpty() &&
-            event.changes.none { it.pressed }
+            changes.isNotEmpty() &&
+            changes.none { it.pressed }
         ) {
             TouchAction.CANCEL
         } else {
@@ -2816,7 +2991,7 @@ private fun handlePointerEvent(
 
     return when (action) {
         TouchAction.DOWN -> {
-            val initialPointer = event.changes.firstOrNull { it.pressed } ?: return state
+            val initialPointer = changes.firstOrNull { it.pressed } ?: return state
             val position = initialPointer.position.constrainTo(surfaceWidth, surfaceHeight)
 
             // DOWN establishes only the finger baseline; it never relocates the persistent cursor.
@@ -2834,7 +3009,7 @@ private fun handlePointerEvent(
 
         TouchAction.MOVE -> {
             if (updateMovementBaseline || resetMovementBaseline) {
-                val trackedPointer = event.findPressedPointer(state.trackedPointerId)
+                val trackedPointer = changes.findPressedPointer(state.trackedPointerId)
                 return if (trackedPointer == null) {
                     state.copy(
                         deltaX = 0f,
@@ -2860,7 +3035,7 @@ private fun handlePointerEvent(
                     action = TouchAction.MOVE,
                 )
             }
-            val trackedPointer = event.findPressedPointer(state.trackedPointerId)
+            val trackedPointer = changes.findPressedPointer(state.trackedPointerId)
             if (trackedPointer == null) {
                 state.copy(
                     deltaX = 0f,
@@ -2897,7 +3072,7 @@ private fun handlePointerEvent(
         }
 
         TouchAction.POINTER_DOWN -> {
-            val trackedPointer = event.findPointer(state.trackedPointerId)
+            val trackedPointer = changes.findPointer(state.trackedPointerId)
             if (trackedPointer == null) {
                 state.copy(
                     deltaX = 0f,
@@ -2918,11 +3093,11 @@ private fun handlePointerEvent(
         }
 
         TouchAction.POINTER_UP -> {
-            val liftedPointerId = event.changes
+            val liftedPointerId = changes
                 .firstOrNull { it.previousPressed && !it.pressed }
                 ?.id
             if (liftedPointerId == state.trackedPointerId) {
-                val replacement = event.changes.firstOrNull { it.pressed }
+                val replacement = changes.firstOrNull { it.pressed }
                 if (replacement == null) {
                     state.copy(
                         deltaX = 0f,
@@ -2941,7 +3116,7 @@ private fun handlePointerEvent(
                     )
                 }
             } else {
-                val trackedPointer = event.findPointer(state.trackedPointerId)
+                val trackedPointer = changes.findPointer(state.trackedPointerId)
                 if (trackedPointer == null) {
                     state.copy(
                         deltaX = 0f,
@@ -2962,7 +3137,7 @@ private fun handlePointerEvent(
         }
 
         TouchAction.UP -> {
-            val finalPointer = event.findPointer(state.trackedPointerId)
+            val finalPointer = changes.findPointer(state.trackedPointerId)
             if (finalPointer == null) {
                 state.copy(
                     deltaX = 0f,
@@ -3078,98 +3253,16 @@ internal fun TouchState.withTransientInputCleared(): TouchState = copy(
     moveEventCount = 0,
 )
 
-private fun PointerEvent.findPointer(pointerId: PointerId?): PointerInputChange? =
-    pointerId?.let { id -> changes.firstOrNull { it.id == id } }
+private fun List<PointerInputChange>.findPointer(pointerId: PointerId?): PointerInputChange? =
+    pointerId?.let { id -> firstOrNull { it.id == id } }
 
-private fun PointerEvent.findPressedPointer(pointerId: PointerId?): PointerInputChange? =
-    findPointer(pointerId)?.takeIf { it.pressed } ?: changes.firstOrNull { it.pressed }
+private fun List<PointerInputChange>.findPressedPointer(pointerId: PointerId?): PointerInputChange? =
+    findPointer(pointerId)?.takeIf { it.pressed } ?: firstOrNull { it.pressed }
 
 private fun Offset.constrainTo(surfaceWidth: Float, surfaceHeight: Float) = Offset(
     x = x.coerceIn(0f, surfaceWidth.coerceAtLeast(0f)),
     y = y.coerceIn(0f, surfaceHeight.coerceAtLeast(0f)),
 )
-
-@Composable
-private fun MouseButtonControls(
-    diagnostics: MouseDiagnostics,
-    onButtonDown: (ScummVMMouseButton) -> Unit,
-    onButtonUp: (ScummVMMouseButton) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        MouseButtonControl(
-            label = "LEFT",
-            button = ScummVMMouseButton.LEFT,
-            isDown = diagnostics.leftButtonDown,
-            onButtonDown = onButtonDown,
-            onButtonUp = onButtonUp,
-            modifier = Modifier.weight(1f),
-        )
-        MouseButtonControl(
-            label = "RIGHT",
-            button = ScummVMMouseButton.RIGHT,
-            isDown = diagnostics.rightButtonDown,
-            onButtonDown = onButtonDown,
-            onButtonUp = onButtonUp,
-            modifier = Modifier.weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun MouseButtonControl(
-    label: String,
-    button: ScummVMMouseButton,
-    isDown: Boolean,
-    onButtonDown: (ScummVMMouseButton) -> Unit,
-    onButtonUp: (ScummVMMouseButton) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Box(
-        contentAlignment = Alignment.Center,
-        modifier = modifier
-            .heightIn(min = AdventurePadDesign.mouseButtonHeight)
-            .background(
-                if (isDown) ButtonPressedBackground else ButtonBackground,
-                AdventurePadDesign.mediumShape,
-            )
-            .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.mediumShape)
-            .pointerInput(button) {
-                var pointerDown = false
-                try {
-                    awaitPointerEventScope {
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Initial)
-                            val pressed = event.changes.any { it.pressed }
-                            if (pressed && !pointerDown) {
-                                pointerDown = true
-                                onButtonDown(button)
-                            } else if (!pressed && pointerDown) {
-                                pointerDown = false
-                                onButtonUp(button)
-                            }
-                            event.changes.forEach(PointerInputChange::consume)
-                        }
-                    }
-                } finally {
-                    if (pointerDown) onButtonUp(button)
-                }
-            }
-            .padding(vertical = 12.dp),
-    ) {
-        Text(
-            text = label,
-            color = PrimaryText,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-        )
-    }
-}
 
 @Composable
 private fun MouseDiagnosticsPanel(
@@ -3371,16 +3464,15 @@ internal enum class TouchAction(val label: String) {
 private val TrackpadBackground = AdventurePadDesign.background
 private val TouchSurfaceBackground = AdventurePadDesign.surface
 private val TouchSurfaceBorder = AdventurePadDesign.outline
-private val ButtonBackground = AdventurePadDesign.surfaceRaised
-private val ButtonPressedBackground = AdventurePadDesign.surfacePressed
 private val StatusBackground = AdventurePadDesign.surface
+private val ButtonPressedBackground = AdventurePadDesign.surfacePressed
 private val PrimaryText = AdventurePadDesign.textPrimary
 private val SecondaryText = AdventurePadDesign.textSecondary
 private val MarkerColor = Color(0xFFD9DDE2)
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private val MinimumNormalTrackpadHeight = 120.dp
-private val NormalLayoutReservedHeight = 224.dp
+private val NormalLayoutReservedHeight = 176.dp
 private const val MaxMoveEventCount = 999_999
 private const val AdventurePadBridgeTag = "AdventurePadBridge"
 private const val RAW_TOUCH_TAG = "AdventurePadRawTouch"

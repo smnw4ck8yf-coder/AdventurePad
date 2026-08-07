@@ -199,12 +199,14 @@ class DisplayCompositionTest {
     @Test fun interfaceHeightFollowsSplitAndTrackpadConsumesRemainder() {
         val smallerInterface = calculateLowerScreenLayout(
             1920, 1080, interfaceAspectRatio = 4f, interfaceVisible = true,
-            mouseButtonsHeight = 68, utilityBarHeight = 56, minimumTrackpadHeight = 120,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
         )!!
         val largerInterface = calculateLowerScreenLayout(
             1920, 1080, interfaceAspectRatio = 2.5f, interfaceVisible = true,
-            mouseButtonsHeight = 68, utilityBarHeight = 56, minimumTrackpadHeight = 120,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
         )!!
+        assertEquals(648, smallerInterface.interfaceHeight)
+        assertEquals(376, smallerInterface.trackpadHeight)
         assertTrue(largerInterface.interfaceHeight > smallerInterface.interfaceHeight)
         assertTrue(largerInterface.trackpadHeight < smallerInterface.trackpadHeight)
     }
@@ -212,21 +214,39 @@ class DisplayCompositionTest {
     @Test fun lowerLayoutKeepsTrackpadAndBottomControlsInsideBounds() {
         val layout = calculateLowerScreenLayout(
             1920, 1080, interfaceAspectRatio = 1.4f, interfaceVisible = true,
-            mouseButtonsHeight = 68, utilityBarHeight = 56, minimumTrackpadHeight = 120,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
         )!!
         assertTrue(layout.trackpadHeight >= 120)
-        assertTrue(layout.mouseButtonsTop >= layout.interfaceHeight + 120)
-        assertTrue(layout.utilityBarTop >= layout.mouseButtonsTop + 68)
+        assertTrue(layout.utilityBarTop >= layout.interfaceHeight + 120)
         assertEquals(1080, layout.bottom)
     }
 
     @Test fun trackpadModeGivesAllFlexibleHeightToTrackpad() {
         val layout = calculateLowerScreenLayout(
             1920, 1080, interfaceAspectRatio = 2.5f, interfaceVisible = false,
-            mouseButtonsHeight = 68, utilityBarHeight = 56, minimumTrackpadHeight = 120,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
         )!!
         assertEquals(0, layout.interfaceHeight)
-        assertEquals(956, layout.trackpadHeight)
+        assertEquals(1024, layout.trackpadHeight)
+    }
+
+    @Test fun lowerPresentationStretchKeepsCropAspectInputAndConsumesTrackpadRemainder() {
+        val aspectPreserved = calculateLowerScreenLayout(
+            1920, 1080, interfaceAspectRatio = 4f, interfaceVisible = true,
+            lowerPanelVerticalScale = 1f,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
+        )!!
+        val stretched = calculateLowerScreenLayout(
+            1920, 1080, interfaceAspectRatio = 4f, interfaceVisible = true,
+            lowerPanelVerticalScale = 1.35f,
+            utilityBarHeight = 56, minimumTrackpadHeight = 120,
+        )!!
+
+        assertEquals(480, aspectPreserved.interfaceHeight)
+        assertEquals(648, stretched.interfaceHeight)
+        assertEquals(aspectPreserved.trackpadHeight - 168, stretched.trackpadHeight)
+        assertEquals(1920, 4 * aspectPreserved.interfaceHeight)
+        assertEquals(1080, stretched.bottom)
     }
 
     @Test fun staleUpperAcknowledgementsAreIgnored() {

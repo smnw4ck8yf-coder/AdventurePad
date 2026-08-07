@@ -38,9 +38,17 @@ internal fun reduceLowerScreenNavigation(
 }
 
 internal enum class GameplayUtilityAction(val label: String) {
-    COMPANION("📖  Companion"),
-    SETTINGS("⚙  Settings"),
+    COMPANION("Companion"),
+    SETTINGS("Settings"),
 }
+
+internal fun GameplayUtilityAction.displayLabel(): String = when (this) {
+    GameplayUtilityAction.COMPANION -> "📖  $label"
+    GameplayUtilityAction.SETTINGS -> "⚙  $label"
+}
+
+internal const val GAMEPLAY_UTILITY_MIN_TOUCH_TARGET_DP = 56
+internal const val LOWER_PAGE_FRACTION = 0.94f
 
 internal val PermanentGameplayUtilityActions = GameplayUtilityAction.entries.toList()
 

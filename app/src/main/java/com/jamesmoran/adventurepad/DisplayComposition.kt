@@ -323,7 +323,6 @@ internal class ControllerTriggerChordResolver(
 internal data class LowerScreenLayout(
     val interfaceHeight: Int,
     val trackpadHeight: Int,
-    val mouseButtonsTop: Int,
     val utilityBarTop: Int,
     val bottom: Int,
 )
@@ -333,28 +332,27 @@ internal fun calculateLowerScreenLayout(
     availableHeight: Int,
     interfaceAspectRatio: Float?,
     interfaceVisible: Boolean,
-    mouseButtonsHeight: Int,
+    lowerPanelVerticalScale: Float = LOWER_PANEL_VERTICAL_SCALE,
     utilityBarHeight: Int,
     minimumTrackpadHeight: Int,
 ): LowerScreenLayout? {
-    if (availableWidth <= 0 || availableHeight <= 0 || mouseButtonsHeight < 0 ||
-        utilityBarHeight < 0 || minimumTrackpadHeight < 0
+    if (availableWidth <= 0 || availableHeight <= 0 || utilityBarHeight < 0 ||
+        minimumTrackpadHeight < 0 || !lowerPanelVerticalScale.isFinite() ||
+        lowerPanelVerticalScale <= 0f
     ) return null
-    val reservedHeight = mouseButtonsHeight + utilityBarHeight + minimumTrackpadHeight
+    val reservedHeight = utilityBarHeight + minimumTrackpadHeight
     val maximumInterfaceHeight = (availableHeight - reservedHeight).coerceAtLeast(0)
     val requestedInterfaceHeight = if (interfaceVisible) {
         interfaceAspectRatio?.takeIf { it.isFinite() && it > 0f }
-            ?.let { (availableWidth / it).toInt().coerceAtLeast(0) }
+            ?.let { (availableWidth / it * lowerPanelVerticalScale).toInt().coerceAtLeast(0) }
             ?: 0
     } else 0
     val interfaceHeight = requestedInterfaceHeight.coerceAtMost(maximumInterfaceHeight)
-    val trackpadHeight = availableHeight - interfaceHeight - mouseButtonsHeight - utilityBarHeight
-    val mouseButtonsTop = interfaceHeight + trackpadHeight
-    val utilityBarTop = mouseButtonsTop + mouseButtonsHeight
+    val trackpadHeight = availableHeight - interfaceHeight - utilityBarHeight
+    val utilityBarTop = interfaceHeight + trackpadHeight
     return LowerScreenLayout(
         interfaceHeight = interfaceHeight,
         trackpadHeight = trackpadHeight,
-        mouseButtonsTop = mouseButtonsTop,
         utilityBarTop = utilityBarTop,
         bottom = utilityBarTop + utilityBarHeight,
     )

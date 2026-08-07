@@ -1,5 +1,6 @@
 package com.jamesmoran.adventurepad
 
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -59,5 +60,22 @@ class LowerScreenNavigationTest {
             listOf(GameplayUtilityAction.COMPANION, GameplayUtilityAction.SETTINGS),
             PermanentGameplayUtilityActions,
         )
+    }
+
+    @Test fun utilityLabelsRenderExactlyOneConfiguredIcon() {
+        assertEquals("📖  Companion", GameplayUtilityAction.COMPANION.displayLabel())
+        assertEquals("⚙  Settings", GameplayUtilityAction.SETTINGS.displayLabel())
+        assertEquals(1, GameplayUtilityAction.SETTINGS.displayLabel().count { it == '⚙' })
+        assertFalse(GameplayUtilityAction.SETTINGS.label.contains('⚙'))
+    }
+
+    @Test fun utilityTargetsAndLowerPagesMeetSizingIntent() {
+        assertTrue(GAMEPLAY_UTILITY_MIN_TOUCH_TARGET_DP >= 56)
+        assertEquals(
+            GAMEPLAY_UTILITY_MIN_TOUCH_TARGET_DP.toFloat(),
+            AdventurePadDesign.utilityTouchTarget.value,
+            0f,
+        )
+        assertTrue(LOWER_PAGE_FRACTION in 0.92f..0.95f)
     }
 }

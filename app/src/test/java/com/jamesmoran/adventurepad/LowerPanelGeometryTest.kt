@@ -32,13 +32,57 @@ class LowerPanelGeometryTest {
         assertEquals(PanelPoint(62.5f, 400f), rotation90.mapSource(SourcePoint(160, 175)))
     }
 
-    @Test fun pillarboxAndLetterboxPaddingAreRejected() {
-        val pillarbox = lowerPanelGeometry(1000, 100, crop, 320, 200, SourceOrientation.NORMAL)!!
-        assertTrue(pillarbox.destination.left > 0f)
-        assertNull(pillarbox.mapTouch(0f, 50f))
-        val letterbox = lowerPanelGeometry(800, 300, crop, 320, 200, SourceOrientation.NORMAL)!!
-        assertTrue(letterbox.destination.top > 0f)
-        assertNull(letterbox.mapTouch(400f, 0f))
+    @Test fun destinationAlwaysFillsSuppliedSurfaceWithoutPadding() {
+        val geometry = lowerPanelGeometry(800, 300, crop, 320, 200, SourceOrientation.NORMAL)!!
+
+        assertEquals(FloatRect(0f, 0f, 800f, 300f), geometry.destination)
+        assertEquals(SourcePoint(0, 150), geometry.mapTouch(0f, 0f))
+        assertEquals(SourcePoint(319, 199), geometry.mapTouch(799.999f, 299.999f))
+    }
+
+    @Test fun destinationStretchDoesNotChangeSourceCrop() {
+        val aspectPreserved = lowerPanelGeometry(
+            800, 125, crop, 320, 200, SourceOrientation.NORMAL,
+        )!!
+        val stretched = lowerPanelGeometry(
+            800, 169, crop, 320, 200, SourceOrientation.NORMAL,
+        )!!
+
+        assertEquals(crop, aspectPreserved.crop)
+        assertEquals(crop, stretched.crop)
+        assertEquals(800f, stretched.destination.width, 0f)
+        assertTrue(stretched.destination.height > aspectPreserved.destination.height)
+        assertEquals(169f, stretched.destination.height, 0f)
+        assertEquals(0f, stretched.destination.top, 0f)
+        assertEquals(169f, stretched.destination.bottom, 0f)
+        assertNull(stretched.mapSource(SourcePoint(160, 149)))
+        assertEquals(150, stretched.mapTouch(400f, 0f)?.y)
+
+        val xScale = stretched.destination.width / (crop.width * 320)
+        val yScale = stretched.destination.height / (crop.height * 200)
+        assertTrue(xScale != yScale)
+    }
+
+    @Test fun stretchedTouchAndCrosshairTransformsRemainInverse() {
+        val geometry = lowerPanelGeometry(
+            800, 300, crop, 320, 200, SourceOrientation.NORMAL,
+        )!!
+        val center = geometry.mapSource(SourcePoint(160, 175))!!
+
+        assertEquals(SourcePoint(160, 175), geometry.mapTouch(center.x, center.y))
+        assertEquals(400f, center.x, 0f)
+        assertEquals(150f, center.y, 0f)
+    }
+
+    @Test fun verticalStretchClampsToAvailableHeightWithoutClipping() {
+        val geometry = lowerPanelGeometry(
+            800, 130, crop, 320, 200, SourceOrientation.NORMAL,
+        )!!
+
+        assertEquals(800f, geometry.destination.width, 0f)
+        assertEquals(130f, geometry.destination.height, 0f)
+        assertEquals(0f, geometry.destination.top, 0f)
+        assertEquals(130f, geometry.destination.bottom, 0f)
     }
 
     @Test fun rotatedCornersUndoRendererOrientation() {

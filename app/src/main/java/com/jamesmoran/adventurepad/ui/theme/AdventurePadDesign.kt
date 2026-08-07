@@ -27,8 +27,9 @@ object AdventurePadDesign {
     val spacingLg = 16.dp
     val spacingXl = 24.dp
     val contentPadding = 16.dp
-    val utilityTouchTarget = 48.dp
-    val mouseButtonHeight = 54.dp
+    val utilityTouchTarget = 56.dp
+    val trackpadOverlayMinimumHeight = 56.dp
+    val trackpadOverlayMaximumHeight = 88.dp
     val cornerSmall = 8.dp
     val cornerMedium = 12.dp
     val cornerLarge = 16.dp

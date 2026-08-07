@@ -2,6 +2,9 @@ package com.jamesmoran.adventurepad
 
 import kotlin.math.floor
 
+/** Global presentation-only stretch for the lower interface; source crop coordinates stay unchanged. */
+internal const val LOWER_PANEL_VERTICAL_SCALE = 1.35f
+
 internal data class FloatRect(
     val left: Float,
     val top: Float,
@@ -18,7 +21,7 @@ internal data class FloatRect(
 internal data class SourcePoint(val x: Int, val y: Int)
 internal data class PanelPoint(val x: Float, val y: Float)
 
-/** Authoritative lower-panel aspect-fit and panel-to-virtual-source transform. */
+/** Authoritative stretched lower-panel destination and panel-to-virtual-source transform. */
 internal data class LowerPanelGeometry(
     val surfaceWidth: Int,
     val surfaceHeight: Int,
@@ -82,13 +85,12 @@ internal fun lowerPanelGeometry(
     val cropWidth = crop.width * sourceWidth
     val cropHeight = crop.height * sourceHeight
     if (!cropWidth.isFinite() || !cropHeight.isFinite() || cropWidth <= 0f || cropHeight <= 0f) return null
-    val orientedWidth = if (orientation.swapsDimensions) cropHeight else cropWidth
-    val orientedHeight = if (orientation.swapsDimensions) cropWidth else cropHeight
-    val scale = minOf(surfaceWidth / orientedWidth, surfaceHeight / orientedHeight)
-    val destinationWidth = orientedWidth * scale
-    val destinationHeight = orientedHeight * scale
-    val left = (surfaceWidth - destinationWidth) / 2f
-    val top = (surfaceHeight - destinationHeight) / 2f
+    // The lower mirror intentionally maps the crop across the entire supplied surface.
+    // Its X and Y scales are independent; there is no aspect fit or padding rectangle.
+    val destinationWidth = surfaceWidth.toFloat()
+    val destinationHeight = surfaceHeight.toFloat()
+    val left = 0f
+    val top = 0f
     return LowerPanelGeometry(
         surfaceWidth = surfaceWidth,
         surfaceHeight = surfaceHeight,
