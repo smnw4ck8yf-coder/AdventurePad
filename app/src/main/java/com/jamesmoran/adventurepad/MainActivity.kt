@@ -21,6 +21,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,13 +29,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemes
 import java.util.Locale
 
 class MainActivity : ComponentActivity() {
@@ -42,6 +45,7 @@ class MainActivity : ComponentActivity() {
     private var lastLaunchResult by mutableStateOf("Waiting for initial trackpad launch.")
     private var receivedIntentFlags by mutableStateOf(0)
     private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
+    private lateinit var themePreferencesRepository: ThemePreferencesRepository
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -51,15 +55,16 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val displayManager = getSystemService(DisplayManager::class.java)
+        themePreferencesRepository = ThemePreferencesRepository.create(this, lifecycleScope)
 
         setContent {
-            AdventurePadTheme {
+            val activeTheme by themePreferencesRepository.activeTheme.collectAsState()
+            AdventurePadTheme(theme = activeTheme) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     DisplayInfoScreen(
                         heading = "TOP DISPLAY",
                         display = displayManager.getDisplay(currentDisplayId)
                             ?: displayManager.getDisplay(Display.DEFAULT_DISPLAY),
-                        backgroundColor = TopDisplayBackground,
                         diagnostics = runtimeDiagnostics(),
                         onRestoreBothScreens = ::restoreBothScreens,
                     )
@@ -142,6 +147,8 @@ class MainActivity : ComponentActivity() {
 private fun TopDisplayCursor() {
     var cursorState by remember { mutableStateOf(TopCursorState()) }
     val cursorRadius = with(LocalDensity.current) { TopCursorRadius.toPx() }
+    val cursorColor = AdventurePadThemeTokens.components.topCursor
+    val cursorOutlineColor = AdventurePadThemeTokens.components.topCursorOutline
 
     DisposableEffect(cursorRadius) {
         val subscription = CursorDeltaCoordinator.subscribe { delta ->
@@ -167,12 +174,12 @@ private fun TopDisplayCursor() {
             center
         }
         drawCircle(
-            color = Color.Black,
+            color = cursorOutlineColor,
             radius = cursorRadius + TopCursorOutline.toPx(),
             center = cursorCenter,
         )
         drawCircle(
-            color = TopCursorColor,
+            color = cursorColor,
             radius = cursorRadius,
             center = cursorCenter,
         )
@@ -246,18 +253,18 @@ internal fun ActivityDiagnosticsPanel(
         Text(
             text = "Display ${diagnostics.displayId}  •  Task ${diagnostics.taskId}  •  " +
                 "Root ${diagnostics.isTaskRoot}  •  ${diagnostics.lifecycleEvent}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.bodyLarge,
         )
         Text(
             text = "Intent flags: ${diagnostics.intentFlags.toHexFlags()}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(top = 4.dp),
         )
         Text(
             text = "Last result: ${diagnostics.lastResult}",
-            color = Color(0xFFFFD166),
+            color = AdventurePadThemeTokens.colors.primary,
             fontWeight = FontWeight.SemiBold,
             style = MaterialTheme.typography.bodyLarge,
             modifier = Modifier.padding(top = 4.dp),
@@ -275,7 +282,6 @@ internal fun ActivityDiagnosticsPanel(
 internal fun DisplayInfoScreen(
     heading: String,
     display: Display?,
-    backgroundColor: Color,
     diagnostics: ActivityRuntimeDiagnostics,
     onRestoreBothScreens: () -> Unit,
 ) {
@@ -284,38 +290,38 @@ internal fun DisplayInfoScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(backgroundColor)
+            .background(AdventurePadThemeTokens.components.topDisplayBackground)
             .padding(32.dp),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
             text = heading,
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.headlineLarge,
         )
         Text(
             text = "Display ID: ${display?.displayId ?: "unavailable"}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.titleLarge,
             modifier = Modifier.padding(top = 24.dp),
         )
         Text(
             text = "Name: ${display?.name ?: "unavailable"}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
         Text(
             text = "Resolution: ${mode?.let { "${it.physicalWidth} × ${it.physicalHeight}" } ?: "unavailable"}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
         Text(
             text = "Refresh rate: ${mode?.let { String.format(Locale.US, "%.2f Hz", it.refreshRate) } ?: "unavailable"}",
-            color = Color.White,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.titleMedium,
             modifier = Modifier.padding(top = 8.dp),
         )
@@ -327,8 +333,6 @@ internal fun DisplayInfoScreen(
     }
 }
 
-private val TopDisplayBackground = Color(0xFF102A43)
-private val TopCursorColor = Color(0xFFFFD166)
 private val TopCursorRadius = 14.dp
 private val TopCursorOutline = 3.dp
 
@@ -339,7 +343,6 @@ private fun TopDisplayPreview() {
         DisplayInfoScreen(
             heading = "TOP DISPLAY",
             display = null,
-            backgroundColor = TopDisplayBackground,
             diagnostics = ActivityRuntimeDiagnostics(
                 displayId = 0,
                 taskId = 1,
@@ -347,6 +350,26 @@ private fun TopDisplayPreview() {
                 lifecycleEvent = "RESUMED",
                 intentFlags = 0,
                 lastResult = "Preview",
+            ),
+            onRestoreBothScreens = {},
+        )
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun OceanTopDisplayPreview() {
+    AdventurePadTheme(theme = AdventurePadThemes.Ocean) {
+        DisplayInfoScreen(
+            heading = "TOP DISPLAY",
+            display = null,
+            diagnostics = ActivityRuntimeDiagnostics(
+                displayId = 0,
+                taskId = 1,
+                isTaskRoot = true,
+                lifecycleEvent = "RESUMED",
+                intentFlags = 0,
+                lastResult = "Ocean theme preview",
             ),
             onRestoreBothScreens = {},
         )

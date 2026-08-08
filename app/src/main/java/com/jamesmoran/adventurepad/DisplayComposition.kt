@@ -64,6 +64,16 @@ internal data class PresentationTarget(
     val runtimePanelRequested: Boolean,
 )
 
+internal fun compatibleCropSplit(
+    selection: MirrorCropSelection,
+    geometry: MirrorSourceGeometry,
+    pendingTargetId: String? = null,
+): InterfaceSplit? = selection.profile.takeIf { profile ->
+    (selection.gameId == geometry.gameId ||
+        selection.gameId.isBlank() && pendingTargetId == geometry.gameId) &&
+        profile.isCompatibleWith(geometry)
+}?.split
+
 internal fun resolvePresentationTarget(
     preferredMode: DisplayMode,
     savedSplit: InterfaceSplit?,

@@ -1,3 +1,10 @@
+<p align="center">
+  <img src="media/Hero.jpeg" width="900">
+</p>
+
+# AdventurePad
+
+Turn your AYN Thor into the ultimate dual-screen ScummVM handheld.
 # AdventurePad
 
 AdventurePad is a companion application for ScummVM designed specifically for dual-screen Android handhelds such as the AYN Thor.

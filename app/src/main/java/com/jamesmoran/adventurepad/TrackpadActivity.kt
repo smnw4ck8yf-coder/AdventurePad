@@ -36,8 +36,10 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -71,7 +73,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeDefinition
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemes
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -105,11 +110,14 @@ class TrackpadActivity : ComponentActivity() {
     private val rawTouchDiagnostics = RawTouchDiagnostics()
     private val touchProvenance = TrackpadTouchProvenance()
     private lateinit var pointerSpeedRepository: PointerSpeedRepository
+    private lateinit var themePreferencesRepository: ThemePreferencesRepository
     private lateinit var mirrorCropRepository: MirrorCropRepository
     private lateinit var displayModePreferencesRepository: DisplayModePreferencesRepository
     private lateinit var companionNotesRepository: CompanionNotesRepository
     private lateinit var walkthroughRepository: WalkthroughRepository
     private var mirrorSourceGeometry by mutableStateOf<MirrorSourceGeometry?>(null)
+    private var pendingCropTargetId: String? = null
+    private var cropTargetHandoffJob: Job? = null
     private var companionTargetId by mutableStateOf("")
     private var mirrorCursorState by mutableStateOf(MirrorCursorState())
     private var cropEditorModel by mutableStateOf<CropEditorModel?>(null)
@@ -151,6 +159,9 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        Log.i("AdventurePadTarget", "TrackpadActivity onCreate")
+
         receivedIntentFlags = intent.flags
         currentDisplayId = display?.displayId ?: Display.INVALID_DISPLAY
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
@@ -160,6 +171,7 @@ class TrackpadActivity : ComponentActivity() {
         touchProvenance.reset(gestureResetGeneration)
         rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
         pointerSpeedRepository = PointerSpeedRepository.create(this, lifecycleScope)
+        themePreferencesRepository = ThemePreferencesRepository.create(this, lifecycleScope)
         mirrorCropRepository = MirrorCropRepository.create(this, lifecycleScope)
         displayModePreferencesRepository = DisplayModePreferencesRepository.create(this, lifecycleScope)
         companionNotesRepository = CompanionNotesRepository.create(this, lifecycleScope)
@@ -188,6 +200,7 @@ class TrackpadActivity : ComponentActivity() {
 
         setContent {
             val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
+            val activeTheme by themePreferencesRepository.activeTheme.collectAsState()
             val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
             val cropSelection by mirrorCropRepository.selection.collectAsState()
             val notesSelection by companionNotesRepository.selection.collectAsState()
@@ -197,7 +210,7 @@ class TrackpadActivity : ComponentActivity() {
             val currentNotes = notesSelection.notes.takeIf { notesSelection.gameId == currentGameId }.orEmpty()
             val currentWalkthrough = walkthroughSelection.document
                 .takeIf { walkthroughSelection.gameId == currentGameId }
-            AdventurePadTheme {
+            AdventurePadTheme(theme = activeTheme) {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
                     displayId = currentDisplayId,
@@ -224,9 +237,15 @@ class TrackpadActivity : ComponentActivity() {
                     gestureResetGeneration = gestureResetGeneration,
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
+                    activeTheme = activeTheme,
                     onPointerSpeedSelected = { selectedSpeed ->
                         lifecycleScope.launch {
                             pointerSpeedRepository.setPointerSpeed(selectedSpeed)
+                        }
+                    },
+                    onThemeSelected = { selectedTheme ->
+                        lifecycleScope.launch {
+                            themePreferencesRepository.selectTheme(selectedTheme)
                         }
                     },
                     onNotesChanged = { notes ->
@@ -442,16 +461,41 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     private fun handleMirrorGeometry(geometry: MirrorSourceGeometry) {
+        Log.i(
+        "AdventurePadTarget",
+        "handleMirrorGeometry gameId='${geometry.gameId}' generation=${geometry.generation}"
+    )
         val previous = mirrorSourceGeometry
         val changed = previous != null &&
             (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
         mirrorSourceGeometry = geometry
-        mirrorCropRepository.selectGame(geometry.gameId)
+        when {
+            pendingCropTargetId == geometry.gameId -> Unit
+            mirrorCropRepository.selection.value.gameId.isBlank() && geometry.gameId.isNotBlank() -> {
+                cropTargetHandoffJob?.cancel()
+                pendingCropTargetId = geometry.gameId
+                cropTargetHandoffJob = lifecycleScope.launch {
+                    try {
+                        mirrorCropRepository.handoffLauncherProfile(geometry.gameId, geometry)
+                    } finally {
+                        if (pendingCropTargetId == geometry.gameId) {
+                            pendingCropTargetId = null
+                            reconcileDisplayComposition()
+                        }
+                    }
+                }
+            }
+            else -> mirrorCropRepository.selectGame(geometry.gameId)
+        }
         companionTargetId = retainAndRouteCompanionTargetId(
             currentTargetId = companionTargetId,
             reportedTargetId = geometry.gameId,
             selectNotesTarget = companionNotesRepository::selectGame,
             selectWalkthroughTarget = walkthroughRepository::selectGame,
+        )
+        Log.i(
+            "AdventurePadTarget",
+            "companionTargetId='$companionTargetId'"
         )
         if (!geometry.isSupported) {
             if (cropEditorVisible) cancelCropEditor()
@@ -514,10 +558,8 @@ class TrackpadActivity : ComponentActivity() {
         val preferences = displayModePreferencesRepository.preferences.value
         val geometry = mirrorSourceGeometry
         val selection = mirrorCropRepository.selection.value
-        val profile = selection.profile
         val savedSplit = geometry?.let {
-            profile.takeIf { candidate -> selection.gameId == it.gameId && candidate.isCompatibleWith(it) }
-                ?.split
+            compatibleCropSplit(selection, it, pendingCropTargetId)
         }
         val activeView = mirrorHost
         val activeSurfaceReady = mirrorOutputStatus.state == MirrorOutputState.SUPPORTED &&
@@ -1116,7 +1158,9 @@ private fun AdventurePadScreen(
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
+    activeTheme: AdventurePadThemeDefinition,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
+    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
     onNotesChanged: (String) -> Unit,
     onSaveWalkthroughToNotes: (String, String?) -> Unit,
     onWalkthroughImported: (WalkthroughDocument) -> Unit,
@@ -1159,7 +1203,7 @@ private fun AdventurePadScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(TrackpadBackground)
+            .background(AdventurePadThemeTokens.colors.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
         Column(Modifier.fillMaxSize()) {
@@ -1236,7 +1280,7 @@ private fun AdventurePadScreen(
         if (cropEditorModel == null && shouldBlockGameplayTouch(navigationState)) {
             val blockingModifier = Modifier
                 .fillMaxSize()
-                .background(TrackpadBackground)
+                .background(AdventurePadThemeTokens.colors.background)
                 .pointerInput(activePage) {
                     awaitPointerEventScope {
                         while (true) {
@@ -1248,8 +1292,8 @@ private fun AdventurePadScreen(
                 val pageModifier = Modifier
                     .fillMaxSize(LOWER_PAGE_FRACTION)
                     .align(Alignment.Center)
-                    .clip(AdventurePadDesign.largeShape)
-                    .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape)
+                    .clip(AdventurePadThemeTokens.shapes.large)
+                    .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large)
                 when (activePage) {
                     LowerScreenPage.COMPANION -> CompanionScreen(
                         gameId = currentGameId,
@@ -1279,6 +1323,8 @@ private fun AdventurePadScreen(
                     LowerScreenPage.SETTINGS -> PointerSpeedSettings(
                         pointerSpeed = pointerSpeed,
                         onPointerSpeedSelected = onPointerSpeedSelected,
+                        activeTheme = activeTheme,
+                        onThemeSelected = onThemeSelected,
                         displayModePreferences = displayModePreferences,
                         displayMode = displayMode,
                         upperExpansionSupported = upperExpansionSupported,
@@ -1327,6 +1373,8 @@ private fun MirrorPrototypePanel(
 ) {
     val context = LocalContext.current
     val mirrorHost = remember(context) { createMirrorHost(context) }
+    val themeColors = AdventurePadThemeTokens.colors
+    val componentStyles = AdventurePadThemeTokens.components
     var panelWidth by remember { mutableStateOf(0) }
     var panelHeightPixels by remember { mutableStateOf(0) }
 
@@ -1339,7 +1387,7 @@ private fun MirrorPrototypePanel(
         modifier = Modifier
             .fillMaxWidth()
             .height(panelHeight)
-            .background(Color.Black)
+            .background(AdventurePadThemeTokens.components.mirrorBackdrop)
             .onSizeChanged {
                 panelWidth = it.width
                 panelHeightPixels = it.height
@@ -1371,14 +1419,14 @@ private fun MirrorPrototypePanel(
                 val radius = 7.dp.toPx()
                 val gap = 2.dp.toPx()
                 val stroke = 1.dp.toPx()
-                drawLine(Color.Black, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke + 2f)
-                drawLine(Color.Black, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke + 2f)
-                drawLine(Color.Black, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke + 2f)
-                drawLine(Color.Black, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke + 2f)
-                drawLine(PrimaryText, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke)
-                drawLine(PrimaryText, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke)
-                drawLine(PrimaryText, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke)
-                drawLine(PrimaryText, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke)
+                drawLine(componentStyles.cropHandle, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke + 2f)
+                drawLine(componentStyles.cropHandle, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke + 2f)
+                drawLine(componentStyles.cropHandle, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke + 2f)
+                drawLine(componentStyles.cropHandle, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke + 2f)
+                drawLine(themeColors.textPrimary, center.copy(x = center.x - radius), center.copy(x = center.x - gap), stroke)
+                drawLine(themeColors.textPrimary, center.copy(x = center.x + gap), center.copy(x = center.x + radius), stroke)
+                drawLine(themeColors.textPrimary, center.copy(y = center.y - radius), center.copy(y = center.y - gap), stroke)
+                drawLine(themeColors.textPrimary, center.copy(y = center.y + gap), center.copy(y = center.y + radius), stroke)
             }
         }
     }
@@ -1388,6 +1436,8 @@ private fun MirrorPrototypePanel(
 private fun PointerSpeedSettings(
     pointerSpeed: PointerSpeed,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
+    activeTheme: AdventurePadThemeDefinition,
+    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
     displayModePreferences: DisplayModePreferences,
     displayMode: DisplayMode,
     upperExpansionSupported: Boolean,
@@ -1405,11 +1455,13 @@ private fun PointerSpeedSettings(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var themeDialogVisible by rememberSaveable { mutableStateOf(false) }
+
     AdventurePadScrollablePage(
         modifier = modifier
             .fillMaxWidth()
-            .background(TouchSurfaceBackground)
-            .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape),
+            .background(AdventurePadThemeTokens.colors.surface)
+            .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -1417,7 +1469,7 @@ private fun PointerSpeedSettings(
         SettingsSectionTitle("GENERAL")
         Text(
             text = "Pointer speed · ${pointerSpeed.label}",
-            color = PrimaryText,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             fontWeight = FontWeight.Medium,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -1430,15 +1482,15 @@ private fun PointerSpeedSettings(
                     onClick = { onPointerSpeedSelected(option) },
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (option == pointerSpeed) {
-                            ButtonPressedBackground
+                            AdventurePadThemeTokens.colors.surfacePressed
                         } else {
                             Color.Transparent
                         },
-                        contentColor = PrimaryText,
+                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
                     ),
                     border = BorderStroke(
                         width = if (option == pointerSpeed) 2.dp else 1.dp,
-                        color = if (option == pointerSpeed) PrimaryText else TouchSurfaceBorder,
+                        color = if (option == pointerSpeed) AdventurePadThemeTokens.colors.textPrimary else AdventurePadThemeTokens.colors.outline,
                     ),
                     modifier = Modifier.weight(1f),
                 ) {
@@ -1456,7 +1508,7 @@ private fun PointerSpeedSettings(
         }
         Text(
             text = "Default Mode",
-            color = PrimaryText,
+            color = AdventurePadThemeTokens.colors.textPrimary,
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium,
         )
@@ -1466,13 +1518,13 @@ private fun PointerSpeedSettings(
                     onClick = { onPreferredDisplayModeChanged(mode) },
                     colors = ButtonDefaults.outlinedButtonColors(
                         containerColor = if (displayModePreferences.preferredMode == mode) {
-                            ButtonPressedBackground
+                            AdventurePadThemeTokens.colors.surfacePressed
                         } else {
                             Color.Transparent
                         },
-                        contentColor = PrimaryText,
+                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
                     ),
-                    border = BorderStroke(1.dp, TouchSurfaceBorder),
+                    border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
                     modifier = Modifier.weight(1f),
                 ) {
                     Text(if (mode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD")
@@ -1481,39 +1533,54 @@ private fun PointerSpeedSettings(
         }
         Text(
             text = "Current mode: ${if (displayMode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD"}",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
+        SettingsSectionTitle("APPEARANCE")
+        OutlinedButton(
+            onClick = { themeDialogVisible = true },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+            border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Theme", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(activeTheme.displayName, color = AdventurePadThemeTokens.colors.textSecondary)
+            }
+        }
         SettingsSectionTitle("SPLIT VIEW")
         if (!upperExpansionSupported) {
             Text(
                 text = "Set a valid split to enable Split View Mode.",
-                color = SecondaryText,
+                color = AdventurePadThemeTokens.colors.textSecondary,
                 style = MaterialTheme.typography.bodySmall,
             )
         }
         OutlinedButton(
             onClick = onConfigureCrop,
             enabled = cropConfigurationEnabled,
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
-            border = BorderStroke(1.dp, TouchSurfaceBorder),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+            border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
         ) {
             Text("CONFIGURE SPLIT VIEW")
         }
         SettingsSectionTitle("INPUT")
         Text(
             text = "Tap for left click · two-finger tap for right click · double-tap and hold to drag.",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
             text = "Mode shortcuts: two-finger double tap, or L2 + R2.",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodyMedium,
         )
         Text(
             text = "Known issue: L2 + R2 is focus-dependent on the AYN Thor and only works while the lower display owns input focus.",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
         SettingsSectionTitle("RECOVERY")
@@ -1523,16 +1590,16 @@ private fun PointerSpeedSettings(
         ) {
             OutlinedButton(
                 onClick = onRestoreTrackpad,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
-                border = BorderStroke(1.dp, TouchSurfaceBorder),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+                border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
                 modifier = Modifier.weight(1f),
             ) {
                 Text("RESTORE TRACKPAD")
             }
             OutlinedButton(
                 onClick = onRestoreBothScreens,
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
-                border = BorderStroke(1.dp, TouchSurfaceBorder),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+                border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
                 modifier = Modifier.weight(1f),
             ) {
                 Text("RESTORE BOTH SCREENS")
@@ -1541,8 +1608,8 @@ private fun PointerSpeedSettings(
         SettingsSectionTitle("ADVANCED / DIAGNOSTICS")
         OutlinedButton(
             onClick = { onDiagnosticsVisibleChanged(!diagnosticsVisible) },
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = SecondaryText),
-            border = BorderStroke(1.dp, TouchSurfaceBorder),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
+            border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
         ) {
             Text(if (diagnosticsVisible) "HIDE TECHNICAL INFORMATION" else "SHOW TECHNICAL INFORMATION")
         }
@@ -1555,13 +1622,64 @@ private fun PointerSpeedSettings(
             )
         }
     }
+
+    if (themeDialogVisible) {
+        ThemeSelectionDialog(
+            activeTheme = activeTheme,
+            onThemeSelected = {
+                onThemeSelected(it)
+                themeDialogVisible = false
+            },
+            onDismiss = { themeDialogVisible = false },
+        )
+    }
+}
+
+@Composable
+private fun ThemeSelectionDialog(
+    activeTheme: AdventurePadThemeDefinition,
+    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Theme") },
+        text = {
+            Column {
+                AdventurePadThemes.BuiltIns.forEach { theme ->
+                    OutlinedButton(
+                        onClick = { onThemeSelected(theme) },
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = if (theme.id == activeTheme.id) {
+                                AdventurePadThemeTokens.colors.surfacePressed
+                            } else {
+                                Color.Transparent
+                            },
+                            contentColor = AdventurePadThemeTokens.colors.textPrimary,
+                        ),
+                        border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        RadioButton(
+                            selected = theme.id == activeTheme.id,
+                            onClick = null,
+                        )
+                        Text(theme.displayName, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("CANCEL") }
+        },
+    )
 }
 
 @Composable
 private fun SettingsSectionTitle(title: String) {
     Text(
         text = title,
-        color = AdventurePadDesign.primary,
+        color = AdventurePadThemeTokens.colors.primary,
         fontWeight = FontWeight.Bold,
         style = MaterialTheme.typography.labelLarge,
         modifier = Modifier.padding(top = AdventurePadDesign.spacingSm),
@@ -1582,6 +1700,8 @@ private fun MirrorCropEditor(
 ) {
     val context = LocalContext.current
     val mirrorHost = remember(context) { createMirrorHost(context) }
+    val themeColors = AdventurePadThemeTokens.colors
+    val componentStyles = AdventurePadThemeTokens.components
     var viewportHeight by remember { mutableStateOf(1) }
     val latestModel by rememberUpdatedState(model)
 
@@ -1594,8 +1714,8 @@ private fun MirrorCropEditor(
         modifier = modifier
             .fillMaxWidth()
             .padding(vertical = 6.dp)
-            .background(TouchSurfaceBackground)
-            .border(2.dp, TouchSurfaceBorder)
+            .background(AdventurePadThemeTokens.colors.surface)
+            .border(2.dp, AdventurePadThemeTokens.colors.outline)
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -1606,7 +1726,7 @@ private fun MirrorCropEditor(
         ) {
             Text(
                 "CONFIGURE SPLIT VIEW",
-                color = PrimaryText,
+                color = AdventurePadThemeTokens.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
@@ -1620,15 +1740,15 @@ private fun MirrorCropEditor(
         }
         Text(
             "Drag the horizontal line to choose where the game ends and Split View begins.",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(model.sourceAspectRatio)
-                .background(Color.Black)
-                .border(3.dp, PrimaryText)
+                .background(AdventurePadThemeTokens.components.mirrorBackdrop)
+                .border(3.dp, AdventurePadThemeTokens.colors.textPrimary)
                 .onSizeChanged { size ->
                     viewportHeight = size.height.coerceAtLeast(1)
                 }
@@ -1649,18 +1769,18 @@ private fun MirrorCropEditor(
             Canvas(Modifier.fillMaxSize()) {
                 val splitY = size.height * model.split.ratio
                 drawRect(
-                    color = Color.Black.copy(alpha = 0.25f),
+                    color = componentStyles.cropOverlay,
                     topLeft = Offset(0f, splitY),
                     size = androidx.compose.ui.geometry.Size(size.width, size.height - splitY),
                 )
                 drawLine(
-                    color = PrimaryText,
+                    color = themeColors.textPrimary,
                     start = Offset(0f, splitY),
                     end = Offset(size.width, splitY),
                     strokeWidth = 6f,
                 )
                 drawLine(
-                    color = Color.Black,
+                    color = componentStyles.cropHandle,
                     start = Offset(0f, splitY + 7f),
                     end = Offset(size.width, splitY + 7f),
                     strokeWidth = 2f,
@@ -1668,24 +1788,24 @@ private fun MirrorCropEditor(
             }
             Text(
                 text = "GAME",
-                color = PrimaryText,
+                color = AdventurePadThemeTokens.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
             )
             Text(
                 text = "SPLIT VIEW",
-                color = PrimaryText,
+                color = AdventurePadThemeTokens.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
             )
         }
         if (cropNeedsReview) {
-            Text("Crop needs review", color = SecondaryText, style = MaterialTheme.typography.bodySmall)
+            Text("Crop needs review", color = AdventurePadThemeTokens.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
         Text(
             "Split: ${(model.split.ratio * 100f).formatOneDecimal()}% • " +
                 "Split View: ${((1f - model.split.ratio) * 100f).formatOneDecimal()}%",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -1706,8 +1826,8 @@ private fun CropEditorButton(
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        colors = ButtonDefaults.outlinedButtonColors(contentColor = PrimaryText),
-        border = BorderStroke(1.dp, TouchSurfaceBorder),
+        colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+        border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
         modifier = modifier,
     ) {
         Text(text, maxLines = 1, style = MaterialTheme.typography.labelSmall)
@@ -1730,12 +1850,12 @@ private fun GameplayUtilityBar(
     ) {
         TextButton(
             onClick = onOpenCompanion,
-            colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
+            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
             modifier = Modifier
                 .heightIn(min = AdventurePadDesign.utilityTouchTarget)
                 .widthIn(min = 132.dp)
-                .background(AdventurePadDesign.surfaceRaised, AdventurePadDesign.mediumShape)
-                .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.mediumShape),
+                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
+                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
         ) {
             Text(
                 text = GameplayUtilityAction.COMPANION.displayLabel(),
@@ -1748,12 +1868,12 @@ private fun GameplayUtilityBar(
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         TextButton(
             onClick = onOpenSettings,
-            colors = ButtonDefaults.textButtonColors(contentColor = SecondaryText),
+            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
             modifier = Modifier
                 .heightIn(min = AdventurePadDesign.utilityTouchTarget)
                 .widthIn(min = 132.dp)
-                .background(AdventurePadDesign.surfaceRaised, AdventurePadDesign.mediumShape)
-                .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.mediumShape),
+                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
+                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
         ) {
             Text(
                 text = GameplayUtilityAction.SETTINGS.displayLabel(),
@@ -1768,7 +1888,7 @@ private fun GameplayUtilityBar(
 private fun ConnectionIndicator(isConnected: Boolean) {
     Text(
         text = if (isConnected) "● Online" else "● Offline",
-        color = if (isConnected) AdventurePadDesign.connected else AdventurePadDesign.disconnected,
+        color = if (isConnected) AdventurePadThemeTokens.colors.connected else AdventurePadThemeTokens.colors.disconnected,
         style = MaterialTheme.typography.labelSmall,
         maxLines = 1,
     )
@@ -1793,12 +1913,14 @@ private fun TouchSurface(
     val density = LocalDensity.current
     val currentButtonDown by rememberUpdatedState(onButtonDown)
     val currentButtonUp by rememberUpdatedState(onButtonUp)
+    val themeColors = AdventurePadThemeTokens.colors
+    val componentStyles = AdventurePadThemeTokens.components
 
     Box(
         modifier = modifier
-            .clip(AdventurePadDesign.largeShape)
-            .background(TouchSurfaceBackground)
-            .border(1.dp, TouchSurfaceBorder, AdventurePadDesign.largeShape)
+            .clip(AdventurePadThemeTokens.shapes.large)
+            .background(AdventurePadThemeTokens.components.trackpadBackground)
+            .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large)
             .onSizeChanged { surfaceSize ->
                 touchState.value = touchState.value.withSurfaceSize(
                     surfaceWidth = surfaceSize.width.toFloat(),
@@ -2089,8 +2211,8 @@ private fun TouchSurface(
                 maximumHeight = AdventurePadDesign.trackpadOverlayMaximumHeight.toPx(),
             )
             overlayGeometry?.let { geometry ->
-                val overlayTint = AdventurePadDesign.surfaceRaised.copy(alpha = 0.58f)
-                val separator = AdventurePadDesign.outline.copy(alpha = 0.72f)
+                val overlayTint = componentStyles.trackpadOverlayTint
+                val separator = componentStyles.trackpadOverlaySeparator
                 drawRect(overlayTint, geometry.left.topLeft, geometry.left.size)
                 drawRect(overlayTint, geometry.right.topLeft, geometry.right.size)
                 drawLine(separator, geometry.left.topLeft, geometry.left.topRight, 1.dp.toPx())
@@ -2115,15 +2237,15 @@ private fun TouchSurface(
                 ),
             )
             drawCircle(
-                Color.White,
+                componentStyles.trackpadMarkerOutline,
                 radius = radius + MarkerOutlineWidth.toPx(),
                 center = markerCenter,
             )
-            drawCircle(MarkerColor, radius = radius, center = markerCenter)
+            drawCircle(componentStyles.trackpadMarker, radius = radius, center = markerCenter)
         }
         Text(
             text = "Left",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             fontWeight = FontWeight.Medium,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier
@@ -2132,7 +2254,7 @@ private fun TouchSurface(
         )
         Text(
             text = "Right",
-            color = SecondaryText,
+            color = AdventurePadThemeTokens.colors.textSecondary,
             fontWeight = FontWeight.Medium,
             style = MaterialTheme.typography.labelMedium,
             modifier = Modifier
@@ -3320,8 +3442,8 @@ private fun MouseDiagnosticsPanel(
         modifier = Modifier
             .fillMaxWidth()
             .padding(bottom = 6.dp)
-            .background(StatusBackground)
-            .border(1.dp, TouchSurfaceBorder)
+            .background(AdventurePadThemeTokens.colors.surface)
+            .border(1.dp, AdventurePadThemeTokens.colors.outline)
             .padding(horizontal = 10.dp, vertical = 6.dp),
     ) {
         Row(modifier = Modifier.fillMaxWidth()) {
@@ -3435,7 +3557,7 @@ private fun DiagnosticValue(
 ) {
     Text(
         text = value,
-        color = SecondaryText,
+        color = AdventurePadThemeTokens.colors.textSecondary,
         fontWeight = FontWeight.Medium,
         style = MaterialTheme.typography.labelMedium,
         maxLines = 1,
@@ -3506,14 +3628,6 @@ internal enum class TouchAction(val label: String) {
     POINTER_UP("POINTER_UP"),
 }
 
-private val TrackpadBackground = AdventurePadDesign.background
-private val TouchSurfaceBackground = AdventurePadDesign.surface
-private val TouchSurfaceBorder = AdventurePadDesign.outline
-private val StatusBackground = AdventurePadDesign.surface
-private val ButtonPressedBackground = AdventurePadDesign.surfacePressed
-private val PrimaryText = AdventurePadDesign.textPrimary
-private val SecondaryText = AdventurePadDesign.textSecondary
-private val MarkerColor = Color(0xFFD9DDE2)
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private val MinimumNormalTrackpadHeight = 120.dp

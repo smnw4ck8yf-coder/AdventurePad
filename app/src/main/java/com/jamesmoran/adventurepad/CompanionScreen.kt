@@ -66,6 +66,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
 import java.io.IOException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -122,7 +123,7 @@ internal fun CompanionScreen(
         lastPersistedNotes = persistedNotes
     }
 
-    Surface(color = AdventurePadDesign.background, modifier = modifier.fillMaxSize()) {
+    Surface(color = AdventurePadThemeTokens.colors.background, modifier = modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
             if (selectedSection != CompanionSection.WALKTHROUGH) {
                 PageHeader(
@@ -131,7 +132,7 @@ internal fun CompanionScreen(
                     onBack = onBack,
                     onClose = onClose,
                 )
-                HorizontalDivider(color = AdventurePadDesign.outline)
+                HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
             }
             Box(Modifier.fillMaxSize()) {
                 when (selectedSection) {
@@ -201,10 +202,16 @@ internal fun PageHeader(
                 modifier = Modifier.offset(y = (-6).dp),
                 )
         }
-        Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(
+            title,
+            color = AdventurePadThemeTokens.colors.textPrimary,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
         TextButton(
             onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadDesign.textSecondary),
+            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
             modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
                 .semantics { contentDescription = "Close" },
         ) { Text(WALKTHROUGH_CLOSE_LABEL) }
@@ -217,7 +224,7 @@ private fun CompanionHome(onOpen: (CompanionSection) -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
     ) {
-        Text("Your game library", color = AdventurePadDesign.textSecondary)
+        Text("Your game library", color = AdventurePadThemeTokens.colors.textSecondary)
         listOf(
             CompanionSection.NOTES to "Write clues and plans",
             CompanionSection.WALKTHROUGH to "Read your imported reference",
@@ -228,8 +235,8 @@ private fun CompanionHome(onOpen: (CompanionSection) -> Unit) {
             val available = section.isAvailable
             Column(
                 Modifier.fillMaxWidth()
-                    .background(AdventurePadDesign.surface, AdventurePadDesign.mediumShape)
-                    .border(AdventurePadDesign.subtleBorder, AdventurePadDesign.mediumShape)
+                    .background(AdventurePadThemeTokens.colors.surface, AdventurePadThemeTokens.shapes.medium)
+                    .border(AdventurePadThemeTokens.components.subtleBorderWidth, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium)
                     .clickable(enabled = available) { onOpen(section) }
                     .padding(horizontal = AdventurePadDesign.spacingLg, vertical = AdventurePadDesign.spacingMd),
             ) {
@@ -238,21 +245,21 @@ private fun CompanionHome(onOpen: (CompanionSection) -> Unit) {
                         section.label,
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (available) AdventurePadDesign.textPrimary else AdventurePadDesign.textSecondary,
+                        color = if (available) AdventurePadThemeTokens.colors.textPrimary else AdventurePadThemeTokens.colors.textSecondary,
                         modifier = Modifier.weight(1f),
                     )
                     if (!available) Text(
                         COMPANION_COMING_SOON_LABEL,
-                        color = AdventurePadDesign.textSecondary,
+                        color = AdventurePadThemeTokens.colors.textSecondary,
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.background(AdventurePadDesign.surfaceRaised, AdventurePadDesign.smallShape)
-                            .border(AdventurePadDesign.subtleBorder, AdventurePadDesign.smallShape)
+                        modifier = Modifier.background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.small)
+                            .border(AdventurePadThemeTokens.components.subtleBorderWidth, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.small)
                             .padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
                     )
                 }
                 Text(
                     description,
-                    color = if (available) AdventurePadDesign.textSecondary else AdventurePadDesign.textSecondary.copy(alpha = 0.65f),
+                    color = if (available) AdventurePadThemeTokens.colors.textSecondary else AdventurePadThemeTokens.colors.textSecondary.copy(alpha = 0.65f),
                     style = MaterialTheme.typography.bodyMedium,
                 )
             }
@@ -268,7 +275,7 @@ private fun NotesSection(notes: String, onNotesChanged: (String) -> Unit) {
         Modifier.fillMaxSize().padding(AdventurePadDesign.contentPadding),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
     ) {
-        Text("Saved automatically for this game.", color = AdventurePadDesign.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text("Saved automatically for this game.", color = AdventurePadThemeTokens.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
         OutlinedTextField(
             value = notes,
             onValueChange = { onNotesChanged(it.take(MAX_NOTES_LENGTH)) },
@@ -364,7 +371,7 @@ private fun WalkthroughImporter(
     }
     Column(Modifier.fillMaxSize()) {
         WalkthroughToolbar(onBack = onBack, onClose = onClose)
-        HorizontalDivider(color = AdventurePadDesign.outline)
+        HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
             verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingMd),
@@ -372,13 +379,13 @@ private fun WalkthroughImporter(
         when (step) {
             ImportStep.CHOOSE -> {
                 Text("Add Walkthrough", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                Text("Import read-only reference material for this game.", color = AdventurePadDesign.textSecondary)
+                Text("Import read-only reference material for this game.", color = AdventurePadThemeTokens.colors.textSecondary)
                 Button(onClick = { step = ImportStep.PASTE }, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("PASTE TEXT") }
                 OutlinedButton(
                     onClick = { launcher.launch(arrayOf("text/plain", "text/markdown")) },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 ) { Text("IMPORT FILE") }
-                Text("Supported files: TXT and Markdown", style = MaterialTheme.typography.bodySmall, color = AdventurePadDesign.textSecondary)
+                Text("Supported files: TXT and Markdown", style = MaterialTheme.typography.bodySmall, color = AdventurePadThemeTokens.colors.textSecondary)
             }
             ImportStep.PASTE -> {
                 Text("Paste walkthrough text", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -432,8 +439,8 @@ private fun WalkthroughImporter(
                     modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
                 ) { Text("IMPORT AS PLAIN TEXT") }
                 TextButton(onClick = { step = ImportStep.CHOOSE; preview = null }) { Text("START AGAIN") }
-                HorizontalDivider(color = AdventurePadDesign.outline)
-                Text("Document preview", style = MaterialTheme.typography.labelLarge, color = AdventurePadDesign.textSecondary)
+                HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
+                Text("Document preview", style = MaterialTheme.typography.labelLarge, color = AdventurePadThemeTokens.colors.textSecondary)
                 analysed.sections.take(12).forEach { section ->
                     Text("  ".repeat((section.level - 1).coerceAtLeast(0)) + section.title)
                 }
@@ -522,8 +529,8 @@ private fun WalkthroughReader(
         }
     }
 
-    val palette = readerPalette(preferences.appearance)
-    Column(Modifier.fillMaxSize().background(AdventurePadDesign.background)) {
+    val palette = AdventurePadThemeTokens.current.readerPalette(preferences.appearance)
+    Column(Modifier.fillMaxSize().background(AdventurePadThemeTokens.colors.background)) {
         val currentOffset by remember(document.rawText, scrollState) {
             derivedStateOf {
                 val layout = textLayout
@@ -604,7 +611,7 @@ private fun WalkthroughReader(
                 )
             }
         }
-        HorizontalDivider(color = AdventurePadDesign.outline)
+        HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
         if (settingsState.isOpen) ReaderSettingsPanel(
             preferences = preferences,
             onAction = ::updateSettings,
@@ -641,8 +648,17 @@ private fun WalkthroughReader(
             )
         } else {
             val activeResult = results.getOrNull(currentResult).takeIf { view == WalkthroughView.SEARCH }
-            val styledText = remember(display, document.sections, palette, activeResult) {
-                walkthroughReaderText(display, document.sections, palette.foreground, palette.heading, activeResult)
+            val readerComponents = AdventurePadThemeTokens.components
+            val styledText = remember(display, document.sections, palette, activeResult, readerComponents) {
+                walkthroughReaderText(
+                    display,
+                    document.sections,
+                    palette.foreground,
+                    palette.heading,
+                    readerComponents.onSearchHighlight,
+                    readerComponents.searchHighlight,
+                    activeResult,
+                )
             }
             Box(
                 Modifier.fillMaxSize().background(palette.background)
@@ -712,7 +728,7 @@ private fun WalkthroughToolbar(
         }
         TextButton(
             onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadDesign.textSecondary),
+            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
             modifier = Modifier.width(48.dp).heightIn(min = 48.dp)
                 .semantics { contentDescription = "Close walkthrough" },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
@@ -735,7 +751,7 @@ private fun ReaderSettingsPanel(
     onAction: (ReaderSettingsAction) -> Unit,
 ) {
     Column(
-        Modifier.fillMaxWidth().background(AdventurePadDesign.surfaceRaised)
+        Modifier.fillMaxWidth().background(AdventurePadThemeTokens.colors.surfaceRaised)
             .padding(horizontal = AdventurePadDesign.spacingMd, vertical = AdventurePadDesign.spacingSm),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingXs),
     ) {
@@ -744,19 +760,19 @@ private fun ReaderSettingsPanel(
                 modifier = Modifier.weight(1f))
             TextButton(onClick = { onAction(ReaderSettingsAction.Close) }) { Text("DONE") }
         }
-        Text("Font", style = MaterialTheme.typography.labelMedium, color = AdventurePadDesign.textSecondary)
+        Text("Font", style = MaterialTheme.typography.labelMedium, color = AdventurePadThemeTokens.colors.textSecondary)
         ReaderSettingChoices(
             labels = ReaderFont.entries.map { it.label },
             selectedLabel = preferences.font.label,
             onSelected = { index -> onAction(ReaderSettingsAction.SelectFont(ReaderFont.entries[index])) },
         )
-        Text("Text size", style = MaterialTheme.typography.labelMedium, color = AdventurePadDesign.textSecondary)
+        Text("Text size", style = MaterialTheme.typography.labelMedium, color = AdventurePadThemeTokens.colors.textSecondary)
         ReaderSettingChoices(
             labels = ReaderTextSize.entries.map { it.label },
             selectedLabel = ReaderTextSize.closestTo(preferences.textScale).label,
             onSelected = { index -> onAction(ReaderSettingsAction.SelectTextSize(ReaderTextSize.entries[index])) },
         )
-        Text("Background", style = MaterialTheme.typography.labelMedium, color = AdventurePadDesign.textSecondary)
+        Text("Background", style = MaterialTheme.typography.labelMedium, color = AdventurePadThemeTokens.colors.textSecondary)
         ReaderSettingChoices(
             labels = ReadingAppearance.entries.map { it.label },
             selectedLabel = preferences.appearance.label,
@@ -798,22 +814,6 @@ private fun ReaderSettingChoices(
     }
 }
 
-private data class ReaderPalette(val background: Color, val foreground: Color, val heading: Color)
-
-private fun readerPalette(appearance: ReadingAppearance): ReaderPalette = when (appearance) {
-    ReadingAppearance.DARK -> ReaderPalette(
-        AdventurePadDesign.background,
-        AdventurePadDesign.textPrimary,
-        AdventurePadDesign.primary,
-    )
-    ReadingAppearance.BLACK -> ReaderPalette(Color.Black, Color(0xFFF5F5F5), Color(0xFFE5C873))
-    ReadingAppearance.DARK_GREY -> ReaderPalette(Color(0xFF282B2E), Color(0xFFF4F4F2), Color(0xFFE5C873))
-    ReadingAppearance.LIGHT -> ReaderPalette(Color(0xFFF5F3EE), Color(0xFF1E1E1B), Color(0xFF684D08))
-    ReadingAppearance.BEIGE -> ReaderPalette(Color(0xFFF2E5C4), Color(0xFF181613), Color(0xFF604407))
-    ReadingAppearance.TAN -> ReaderPalette(Color(0xFFE6D0A9), Color(0xFF17130F), Color(0xFF563B0B))
-    ReadingAppearance.WARM -> ReaderPalette(Color(0xFFF1E4C9), Color(0xFF3C3024), Color(0xFF604407))
-}
-
 private fun readerFontFamily(font: ReaderFont): FontFamily = when (font) {
     ReaderFont.SANS_SERIF -> FontFamily.SansSerif
     ReaderFont.SERIF -> FontFamily.Serif
@@ -849,7 +849,7 @@ private fun WalkthroughSearchBar(
             Text(
                 if (query.isBlank()) "" else if (resultCount == 0) "0" else "${currentResult + 1}/$resultCount",
                 style = MaterialTheme.typography.bodySmall,
-                color = AdventurePadDesign.textSecondary,
+                color = AdventurePadThemeTokens.colors.textSecondary,
             )
             TextButton(
                 enabled = resultCount > 0,
@@ -868,7 +868,7 @@ private fun WalkthroughSearchBar(
         result?.let {
             Text(
                 text = listOfNotNull(it.sectionTitle, it.snippet).joinToString(" · "),
-                color = AdventurePadDesign.textSecondary,
+                color = AdventurePadThemeTokens.colors.textSecondary,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onResultSelected)
@@ -883,6 +883,8 @@ private fun walkthroughReaderText(
     sections: List<WalkthroughSection>,
     foreground: Color,
     heading: Color,
+    onSearchHighlight: Color,
+    searchHighlight: Color,
     activeResult: WalkthroughSearchResult?,
 ): AnnotatedString = AnnotatedString.Builder(display.text).apply {
     var searchFrom = 0
@@ -902,8 +904,8 @@ private fun walkthroughReaderText(
         val range = display.displayRange(result.offset, result.length)
         if (!range.isEmpty()) addStyle(
             SpanStyle(
-                color = Color(0xFF102126),
-                background = Color(0xFF71D7E5),
+                color = onSearchHighlight,
+                background = searchHighlight,
                 fontWeight = FontWeight.ExtraBold,
             ),
             range.first,
@@ -938,7 +940,7 @@ private fun ContentsPanel(
                 } else Spacer(Modifier.width(44.dp))
                 Text(
                     section.title,
-                    color = if (section.level == 1) AdventurePadDesign.primary else AdventurePadDesign.textPrimary,
+                    color = if (section.level == 1) AdventurePadThemeTokens.colors.primary else AdventurePadThemeTokens.colors.textPrimary,
                     fontWeight = if (section.level == 1) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.weight(1f).clickable { onJump(section) }.padding(vertical = 10.dp),
                 )
@@ -955,12 +957,12 @@ private fun PlaceholderSection(title: String, message: String, supportingText: S
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         Column(
-            Modifier.fillMaxWidth().background(AdventurePadDesign.surface, AdventurePadDesign.mediumShape)
-                .border(AdventurePadDesign.subtleBorder, AdventurePadDesign.mediumShape).padding(AdventurePadDesign.spacingLg),
+            Modifier.fillMaxWidth().background(AdventurePadThemeTokens.colors.surface, AdventurePadThemeTokens.shapes.medium)
+                .border(AdventurePadThemeTokens.components.subtleBorderWidth, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium).padding(AdventurePadDesign.spacingLg),
             verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
         ) {
             Text(message, style = MaterialTheme.typography.bodyLarge)
-            supportingText?.let { Text(it, color = AdventurePadDesign.textSecondary) }
+            supportingText?.let { Text(it, color = AdventurePadThemeTokens.colors.textSecondary) }
         }
     }
 }
@@ -982,11 +984,11 @@ private fun StatisticsSection(statistics: CompanionStatistics) {
 @Composable
 private fun StatisticRow(label: String, value: String) {
     Row(
-        Modifier.fillMaxWidth().background(AdventurePadDesign.surface, AdventurePadDesign.smallShape)
+        Modifier.fillMaxWidth().background(AdventurePadThemeTokens.colors.surface, AdventurePadThemeTokens.shapes.small)
             .padding(horizontal = AdventurePadDesign.spacingLg, vertical = AdventurePadDesign.spacingMd),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = AdventurePadDesign.textSecondary, modifier = Modifier.weight(1f))
+        Text(label, color = AdventurePadThemeTokens.colors.textSecondary, modifier = Modifier.weight(1f))
         Spacer(Modifier.height(1.dp))
         Text(value, fontWeight = FontWeight.Medium)
     }

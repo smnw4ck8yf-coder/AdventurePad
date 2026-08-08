@@ -19,6 +19,7 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 
 internal interface MirrorCropStore {
@@ -124,6 +125,21 @@ internal class MirrorCropRepository(store: MirrorCropStore, scope: CoroutineScop
 
     fun selectGame(gameId: String) {
         activeGameId.value = gameId
+    }
+
+    suspend fun handoffLauncherProfile(gameId: String, geometry: MirrorSourceGeometry) {
+        require(gameId.isNotBlank())
+        if (activeGameId.value == gameId) return
+
+        val targetProfile = cropStore.profile(gameId).first()
+        if (targetProfile == MirrorCropProfile.Empty) {
+            val launcherProfile = cropStore.profile("").first()
+            if (launcherProfile.isCompatibleWith(geometry)) {
+                cropStore.save(gameId, launcherProfile)
+            }
+        }
+        activeGameId.value = gameId
+        selection.first { it.gameId == gameId }
     }
 
     suspend fun save(profile: MirrorCropProfile) = cropStore.save(activeGameId.value, profile)
