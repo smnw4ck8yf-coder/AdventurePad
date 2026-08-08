@@ -1,19 +1,39 @@
 <p align="center">
-  <img src="media/Hero.jpeg" width="900">
+  <img src="media/Hero.jpeg" width="750">
 </p>
 
 # AdventurePad
 
-Turn your AYN Thor into the ultimate dual-screen ScummVM handheld.
-# AdventurePad
+Transform your AYN Thor into the ultimate dual-screen ScummVM handheld.
 
-AdventurePad is a companion application for ScummVM designed specifically for dual-screen Android handhelds such as the AYN Thor.
+AdventurePad is a native Android companion application that transforms the AYN Thor into a true dual-screen adventure gaming device.
 
-It transforms classic point-and-click adventures into a Nintendo DS-style experience by displaying the game on the upper display while providing a dedicated touch interface, live game controls, and controller shortcuts on the lower display.
+While ScummVM runs uninterrupted on the upper display, AdventurePad provides a dedicated lower-screen interface featuring a precision touchpad, walkthrough reader, game notes, controller shortcuts, and game-specific companion tools.
 
----
+Designed specifically for classic point-and-click adventures, AdventurePad aims to recreate the feel of a modern Nintendo DS-style experience while preserving the original ScummVM engine.
 
 # Current Features
+
+## Highlights
+
+- 🎮 Native dual-screen experience for the AYN Thor
+- 🖱️ Precision touchpad with controller integration
+- 📖 Built-in walkthrough reader
+- 📝 Per-game notes
+- ✂️ Adjustable split-view editor with per-game profiles
+- 🎨 Theme support and future skinning foundation
+
+## Gallery
+
+<p align="center">
+  <img src="media/1.png" width="48%">
+  <img src="media/2.png" width="48%">
+</p>
+
+<p align="center">
+  <img src="media/3.png" width="48%">
+  <img src="media/4.png" width="48%">
+</p>
 
 ## Dual Display
 
