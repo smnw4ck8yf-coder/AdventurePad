@@ -32,7 +32,7 @@ Designed specifically for classic point-and-click adventures, AdventurePad aims 
 
 <p align="center">
   <img src="media/3.png" width="48%">
-  <img src="media/4.png" width="48%">
+  <img src="media/4a.png" width="48%">
 </p>
 
 ## Dual Display
