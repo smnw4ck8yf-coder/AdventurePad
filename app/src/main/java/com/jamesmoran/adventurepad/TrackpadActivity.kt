@@ -108,7 +108,9 @@ class TrackpadActivity : ComponentActivity() {
     private lateinit var mirrorCropRepository: MirrorCropRepository
     private lateinit var displayModePreferencesRepository: DisplayModePreferencesRepository
     private lateinit var companionNotesRepository: CompanionNotesRepository
+    private lateinit var walkthroughRepository: WalkthroughRepository
     private var mirrorSourceGeometry by mutableStateOf<MirrorSourceGeometry?>(null)
+    private var companionTargetId by mutableStateOf("")
     private var mirrorCursorState by mutableStateOf(MirrorCursorState())
     private var cropEditorModel by mutableStateOf<CropEditorModel?>(null)
     private var cropEditorVisible by mutableStateOf(false)
@@ -161,6 +163,7 @@ class TrackpadActivity : ComponentActivity() {
         mirrorCropRepository = MirrorCropRepository.create(this, lifecycleScope)
         displayModePreferencesRepository = DisplayModePreferencesRepository.create(this, lifecycleScope)
         companionNotesRepository = CompanionNotesRepository.create(this, lifecycleScope)
+        walkthroughRepository = WalkthroughRepository.create(this, lifecycleScope)
         twoFingerDoubleTapResolver = TwoFingerDoubleTapResolver(
             ViewConfiguration.getDoubleTapTimeout().toLong(),
         )
@@ -188,9 +191,12 @@ class TrackpadActivity : ComponentActivity() {
             val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
             val cropSelection by mirrorCropRepository.selection.collectAsState()
             val notesSelection by companionNotesRepository.selection.collectAsState()
+            val walkthroughSelection by walkthroughRepository.selection.collectAsState()
             val cropProfile = cropSelection.profile
-            val currentGameId = mirrorSourceGeometry?.gameId.orEmpty()
+            val currentGameId = companionTargetId
             val currentNotes = notesSelection.notes.takeIf { notesSelection.gameId == currentGameId }.orEmpty()
+            val currentWalkthrough = walkthroughSelection.document
+                .takeIf { walkthroughSelection.gameId == currentGameId }
             AdventurePadTheme {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
@@ -203,6 +209,7 @@ class TrackpadActivity : ComponentActivity() {
                     cropProfile = cropProfile,
                     currentGameId = currentGameId,
                     persistedNotes = currentNotes,
+                    walkthrough = currentWalkthrough,
                     lastCropAcknowledgement = lastCropAcknowledgement,
                     lastUpperPresentationAcknowledgement = lastUpperPresentationAcknowledgement,
                     cropSavePending = cropSavePending,
@@ -224,6 +231,23 @@ class TrackpadActivity : ComponentActivity() {
                     },
                     onNotesChanged = { notes ->
                         lifecycleScope.launch { companionNotesRepository.save(currentGameId, notes) }
+                    },
+                    onSaveWalkthroughToNotes = { passage, sectionTitle ->
+                        lifecycleScope.launch {
+                            companionNotesRepository.appendWalkthrough(currentGameId, passage, sectionTitle)
+                        }
+                    },
+                    onWalkthroughImported = { document ->
+                        lifecycleScope.launch { walkthroughRepository.save(currentGameId, document) }
+                    },
+                    onWalkthroughRemoved = {
+                        lifecycleScope.launch { walkthroughRepository.remove(currentGameId) }
+                    },
+                    onWalkthroughPositionChanged = { position ->
+                        lifecycleScope.launch { walkthroughRepository.updatePosition(currentGameId, position) }
+                    },
+                    onWalkthroughPreferencesChanged = { preferences ->
+                        lifecycleScope.launch { walkthroughRepository.updatePreferences(currentGameId, preferences) }
                     },
                     onPreferredDisplayModeChanged = { preferredMode ->
                         requestPreferredDisplayMode(preferredMode)
@@ -256,6 +280,8 @@ class TrackpadActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
+        // Register first: the listeners below synchronously replay cached state and may request geometry.
+        ScummVMInputClient.setMirrorGeometryListener(::handleMirrorGeometry)
         ScummVMInputClient.setConnectionStateListener { updatedDiagnostics ->
             val connectionWasLost = connectionDiagnostics.isConnected &&
                 !updatedDiagnostics.isConnected
@@ -290,7 +316,6 @@ class TrackpadActivity : ComponentActivity() {
                 enterSafeTrackpadMode()
             }
         }
-        ScummVMInputClient.setMirrorGeometryListener(::handleMirrorGeometry)
         ScummVMInputClient.setCropAcknowledgementListener(::handleCropAcknowledgement)
         ScummVMInputClient.setUpperPresentationAcknowledgementListener(::handleUpperPresentationAcknowledgement)
         ScummVMInputClient.setMirrorCursorListener { mirrorCursorState = it }
@@ -422,7 +447,12 @@ class TrackpadActivity : ComponentActivity() {
             (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
         mirrorSourceGeometry = geometry
         mirrorCropRepository.selectGame(geometry.gameId)
-        companionNotesRepository.selectGame(geometry.gameId)
+        companionTargetId = retainAndRouteCompanionTargetId(
+            currentTargetId = companionTargetId,
+            reportedTargetId = geometry.gameId,
+            selectNotesTarget = companionNotesRepository::selectGame,
+            selectWalkthroughTarget = walkthroughRepository::selectGame,
+        )
         if (!geometry.isSupported) {
             if (cropEditorVisible) cancelCropEditor()
             return
@@ -1074,6 +1104,7 @@ private fun AdventurePadScreen(
     cropProfile: MirrorCropProfile,
     currentGameId: String,
     persistedNotes: String,
+    walkthrough: WalkthroughDocument?,
     lastCropAcknowledgement: CropAcknowledgement?,
     lastUpperPresentationAcknowledgement: UpperPresentationAcknowledgement?,
     cropSavePending: Boolean,
@@ -1087,6 +1118,11 @@ private fun AdventurePadScreen(
     pointerSpeed: PointerSpeed,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
     onNotesChanged: (String) -> Unit,
+    onSaveWalkthroughToNotes: (String, String?) -> Unit,
+    onWalkthroughImported: (WalkthroughDocument) -> Unit,
+    onWalkthroughRemoved: () -> Unit,
+    onWalkthroughPositionChanged: (WalkthroughPosition) -> Unit,
+    onWalkthroughPreferencesChanged: (WalkthroughReaderPreferences) -> Unit,
     onPreferredDisplayModeChanged: (DisplayMode) -> Unit,
     onGesture: (TrackpadGesture) -> Unit,
     onGestureDiagnostic: (String) -> Unit,
@@ -1104,7 +1140,7 @@ private fun AdventurePadScreen(
     val touchState = remember { mutableStateOf(TouchState()) }
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var activePage by rememberSaveable { mutableStateOf(LowerScreenPage.GAMEPLAY) }
-    var companionSection by rememberSaveable { mutableStateOf(CompanionSection.NOTES) }
+    var companionSection by rememberSaveable { mutableStateOf(CompanionSection.HOME) }
     fun navigate(action: LowerScreenNavigationAction) {
         val updated = reduceLowerScreenNavigation(
             LowerScreenNavigationState(activePage, companionSection),
@@ -1115,7 +1151,9 @@ private fun AdventurePadScreen(
     }
 
     BackHandler(enabled = activePage != LowerScreenPage.GAMEPLAY || cropEditorModel != null) {
-        if (cropEditorModel != null) onCancelCrop() else navigate(LowerScreenNavigationAction.ClosePage)
+        if (cropEditorModel != null) onCancelCrop()
+        else if (activePage == LowerScreenPage.COMPANION) navigate(LowerScreenNavigationAction.BackCompanion)
+        else navigate(LowerScreenNavigationAction.ClosePage)
     }
 
     Box(
@@ -1216,6 +1254,7 @@ private fun AdventurePadScreen(
                     LowerScreenPage.COMPANION -> CompanionScreen(
                         gameId = currentGameId,
                         persistedNotes = persistedNotes,
+                        walkthrough = walkthrough,
                         selectedSection = companionSection,
                         statistics = CompanionStatistics(
                             targetId = currentGameId,
@@ -1225,9 +1264,15 @@ private fun AdventurePadScreen(
                             notesPresent = persistedNotes.isNotBlank(),
                         ),
                         onNotesChanged = onNotesChanged,
+                        onSaveWalkthroughToNotes = onSaveWalkthroughToNotes,
+                        onWalkthroughImported = onWalkthroughImported,
+                        onWalkthroughRemoved = onWalkthroughRemoved,
+                        onWalkthroughPositionChanged = onWalkthroughPositionChanged,
+                        onWalkthroughPreferencesChanged = onWalkthroughPreferencesChanged,
                         onSectionSelected = {
                             navigate(LowerScreenNavigationAction.SelectCompanionSection(it))
                         },
+                        onBack = { navigate(LowerScreenNavigationAction.BackCompanion) },
                         onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
                         modifier = pageModifier,
                     )

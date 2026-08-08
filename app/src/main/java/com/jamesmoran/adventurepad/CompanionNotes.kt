@@ -16,12 +16,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
 internal interface CompanionNotesStore {
     fun notes(gameId: String): Flow<String>
     suspend fun save(gameId: String, notes: String)
+    suspend fun appendWalkthrough(gameId: String, passage: String, sectionTitle: String?)
 }
 
 internal class DataStoreCompanionNotesStore(
@@ -39,6 +41,13 @@ internal class DataStoreCompanionNotesStore(
         }
     }
 
+    override suspend fun appendWalkthrough(gameId: String, passage: String, sectionTitle: String?) {
+        dataStore.edit { preferences ->
+            val key = notesKey(gameId)
+            preferences[key] = appendWalkthroughToNotes(preferences[key].orEmpty(), passage, sectionTitle)
+        }
+    }
+
     private fun notesKey(gameId: String) = stringPreferencesKey("companion_notes_${gameStorageKey(gameId)}")
 }
 
@@ -50,7 +59,8 @@ internal class CompanionNotesRepository(
     private val activeGameId = MutableStateFlow("")
     val selection: StateFlow<CompanionNotesSelection> = activeGameId
         .flatMapLatest { gameId ->
-            store.notes(gameId).map { notes -> CompanionNotesSelection(gameId, notes) }
+            if (gameId.isBlank()) flowOf(CompanionNotesSelection("", ""))
+            else store.notes(gameId).map { notes -> CompanionNotesSelection(gameId, notes) }
         }
         .stateIn(
             scope = scope,
@@ -59,10 +69,19 @@ internal class CompanionNotesRepository(
         )
 
     fun selectGame(gameId: String) {
+        require(gameId.isNotBlank())
         activeGameId.value = gameId
     }
 
-    suspend fun save(gameId: String, notes: String) = store.save(gameId, notes)
+    suspend fun save(gameId: String, notes: String) {
+        require(gameId.isNotBlank())
+        store.save(gameId, notes)
+    }
+
+    suspend fun appendWalkthrough(gameId: String, passage: String, sectionTitle: String?) {
+        require(gameId.isNotBlank())
+        store.appendWalkthrough(gameId, passage, sectionTitle)
+    }
 
     companion object {
         fun create(context: Context, scope: CoroutineScope) = CompanionNotesRepository(
@@ -76,6 +95,17 @@ internal data class CompanionNotesSelection(
     val gameId: String,
     val notes: String,
 )
+
+internal const val NOTES_EDITOR_ACTION_LABEL = "DONE"
+
+internal fun completeNotesEdit(
+    notes: String,
+    onSave: (String) -> Unit,
+    onFinished: () -> Unit,
+) {
+    onSave(notes.take(MAX_NOTES_LENGTH))
+    onFinished()
+}
 
 internal fun gameStorageKey(gameId: String): String = Base64.getUrlEncoder()
     .withoutPadding()

@@ -14,6 +14,7 @@ class LowerScreenNavigationTest {
         )
 
         assertEquals(LowerScreenPage.COMPANION, open.page)
+        assertEquals(CompanionSection.HOME, open.companionSection)
         assertTrue(shouldBlockGameplayTouch(open))
     }
 
@@ -42,7 +43,7 @@ class LowerScreenNavigationTest {
         assertEquals(initial, closed)
     }
 
-    @Test fun selectingCompanionTabsDoesNotChangePageOrMirrorState() {
+    @Test fun unavailableCompanionTabsDoNotChangePageOrMirrorState() {
         val initial = LowerScreenNavigationState(page = LowerScreenPage.COMPANION)
         val crop = NormalizedCrop(0f, 0.7f, 1f, 1f)
         val updated = reduceLowerScreenNavigation(
@@ -51,8 +52,31 @@ class LowerScreenNavigationTest {
         )
 
         assertEquals(LowerScreenPage.COMPANION, updated.page)
-        assertEquals(CompanionSection.STATISTICS, updated.companionSection)
+        assertEquals(CompanionSection.HOME, updated.companionSection)
         assertEquals(NormalizedCrop(0f, 0.7f, 1f, 1f), crop)
+    }
+
+    @Test fun manualDialogueAndStatisticsAreConsistentlyMarkedComingSoon() {
+        val comingSoon = listOf(
+            CompanionSection.MANUAL,
+            CompanionSection.DIALOGUE,
+            CompanionSection.STATISTICS,
+        )
+
+        assertTrue(comingSoon.all { !it.isAvailable })
+        assertEquals("COMING SOON", COMPANION_COMING_SOON_LABEL)
+        assertTrue(CompanionSection.NOTES.isAvailable)
+        assertTrue(CompanionSection.WALKTHROUGH.isAvailable)
+    }
+
+    @Test fun backFromCompanionPageReturnsHomeThenGameplay() {
+        val page = LowerScreenNavigationState(LowerScreenPage.COMPANION, CompanionSection.WALKTHROUGH)
+        val home = reduceLowerScreenNavigation(page, LowerScreenNavigationAction.BackCompanion)
+        val gameplay = reduceLowerScreenNavigation(home, LowerScreenNavigationAction.BackCompanion)
+
+        assertEquals(LowerScreenPage.COMPANION, home.page)
+        assertEquals(CompanionSection.HOME, home.companionSection)
+        assertEquals(LowerScreenPage.GAMEPLAY, gameplay.page)
     }
 
     @Test fun permanentGameplayUtilitiesContainOnlyCompanionAndSettings() {
