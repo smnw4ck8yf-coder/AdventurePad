@@ -26,30 +26,29 @@ Designed specifically for classic point-and-click adventures, AdventurePad aims 
 ## Gallery
 
 <table>
-  <tr>
-    <td align="center" width="50%">
-      <img src="media/1.png" width="100%"><br>
-      <b>🎮 Dual-Screen Gameplay</b><br>
-      
-    </td>
-    <td align="center" width="50%">
-      <img src="media/2.png" width="100%"><br>
-      <b>✂️ Split View Editor</b><br>
-      
-    </td>
-  </tr>
-  <tr>
-    <td align="center" width="50%">
-      <img src="media/3.png" width="100%"><br>
-      <b>💬 Interactive Dialogues</b><br>
-      
-    </td>
-    <td align="center" width="50%">
-      <img src="media/4a.png" width="100%"><br>
-      <b>📖 Built-in Walkthroughs</b><br>
-      
-    </td>
-  </tr>
+<tr>
+<td align="center" width="50%">
+<img src="media/1.png" width="100%"><br>
+<b>🎮 Dual-Screen Gameplay</b>
+</td>
+
+<td align="center" width="50%">
+<img src="media/2.png" width="100%"><br>
+<b>✂️ Split View Editor</b>
+</td>
+</tr>
+
+<tr>
+<td align="center" width="50%">
+<img src="media/3.png" width="100%"><br>
+<b>💬 Interactive Dialogues</b>
+</td>
+
+<td align="center" width="50%">
+<img src="media/4a.png" width="100%"><br>
+<b>📖 Built-in Walkthroughs</b>
+</td>
+</tr>
 </table>
 
 ## Dual Display
