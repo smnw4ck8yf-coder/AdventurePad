@@ -45,7 +45,7 @@ Designed specifically for classic point-and-click adventures, AdventurePad aims 
 </td>
 
 <td align="center" width="50%">
-<img src="media/4a.png" width="100%"><br>
+<img src="media/4c.png" width="100%"><br>
 <b>📖 Built-in Walkthroughs</b>
 </td>
 </tr>
