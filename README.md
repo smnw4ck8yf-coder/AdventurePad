@@ -25,15 +25,32 @@ Designed specifically for classic point-and-click adventures, AdventurePad aims 
 
 ## Gallery
 
-<p align="center">
-  <img src="media/1.png" width="48%">
-  <img src="media/2.png" width="48%">
-</p>
-
-<p align="center">
-  <img src="media/3.png" width="48%">
-  <img src="media/4a.png" width="48%">
-</p>
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <img src="media/1.png" width="100%"><br>
+      <b>🎮 Dual-Screen Gameplay</b><br>
+      <sub>Dedicated lower-screen controls while the game stays on the upper display.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="media/2.png" width="100%"><br>
+      <b>✂️ Split View Editor</b><br>
+      <sub>Adjust the interface split and save the layout for each game.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <img src="media/3.png" width="100%"><br>
+      <b>💬 Interactive Dialogues</b><br>
+      <sub>Keep dialogue choices on the lower display while gameplay continues above.</sub>
+    </td>
+    <td align="center" width="50%">
+      <img src="media/4a.png" width="100%"><br>
+      <b>📖 Built-in Walkthroughs</b><br>
+      <sub>Read game guides directly on the second screen without leaving ScummVM.</sub>
+    </td>
+  </tr>
+</table>
 
 ## Dual Display
 
