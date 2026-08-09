@@ -1,8 +1,8 @@
 # AdventurePad canonical skin authoring template v1
 
-This directory is the Milestone 7.2 artist-facing source. Edit one document: `AdventurePad-Skin-Template-v1.svg`. It contains one exact-size `ARTWORK` child group for every surface/state in the requested authoring contract. The PNG is a flattened inspection reference, not an editable or sliceable source.
+This directory documents the artist-facing registration for AdventurePad's single-PNG Skin Builder. Use `AdventurePad-Skin-Template-v1.svg` and the flattened reference PNG as layout aids, then export one **4720×4040 sRGB PNG** containing only the finished artwork. The creator submits that one PNG; AdventurePad validates its dimensions, slices every registered region, generates the internal assets and metadata, and installs the selectable skin.
 
-This is not a Skin Builder. Nothing here imports a design, slices PNGs, hashes assets, edits `skin.json`, or builds an `.apskin`.
+Creators do not build `.apskin` archives, manifests, folders, or individual assets. Those are internal AdventurePad implementation details. Guide graphics and labels are reference-only and must be hidden or painted over in the submitted master PNG.
 
 ## Layer contract
 
@@ -48,7 +48,7 @@ The master canvas is **4720×4040 px**. Coordinates use a top-left origin and ex
 
 Every 1240×1080 lower artboard represents screen pixels only. The zero-inset, 2 px/dp rectangles are reference geometry, not a density or inset guarantee. Native content, labels, touch targets, scrolling, keyboard resizing, and `WindowInsets.safeDrawing` remain runtime-owned.
 
-Split View has no fixed transparent cutout. Export all of `bottom.split.background`; runtime geometry sizes and layers the mirror above it. Companion, Notes, and Walkthrough retain their existing centered 94% native page layouts. Their page bounds, content zones, scrolling areas, and optional frame placement are guides only.
+Split View has no fixed transparent cutout. Export all of `bottom.split.background`; runtime geometry sizes and layers the mirror above it. Companion, Notes, and Walkthrough retain centered 94% native layouts. In Standard style the native page is opaque. In Immersive style only Notes and Walkthrough remove that opaque pane when their exact artwork exists, so keep their marked text areas pale, quiet, and readable beneath native dark text. Page bounds, dynamic controls, scrolling areas, and optional frame placement remain guides only.
 
 ### Buttons and panel frame
 
@@ -64,8 +64,8 @@ Normal and pressed button artwork are separate groups. Keep artwork label-free: 
 
 The authoritative sources agree on the dimensions and behavior of all 17 included regions. `trackpad.surface` remains a separate runtime asset and is therefore included.
 
-The runtime format also recognizes optional `launcher.background`, `launcher.header`, and `launcher.brand` slots. They are intentionally absent because Milestone 7.2 explicitly enumerates gameplay, lower-screen, control, panel, and preview regions and says not to redesign AdventurePad. Legacy compatibility slots (`bottom.background`, `trackpad.button.left`, `trackpad.button.right`) are likewise not authoritative creator slots.
+The runtime format also recognizes optional `launcher.background`, `launcher.header`, and `launcher.brand` slots. They are intentionally absent from this focused gameplay/lower-screen template. Legacy compatibility slots (`bottom.background`, `trackpad.button.left`, `trackpad.button.right`) are likewise not authoritative creator slots.
 
-## Future Skin Builder consumption
+## Skin Builder consumption
 
-`AUTHORING_TEMPLATE_SPEC.json` supplies slot ID, exact master origin, source/output size, alpha mode, scaling, and nine-slice metadata without a hard-coded coordinate mapping. A future builder should verify the SVG group IDs, ignore non-artwork layers, clip each group to its registered rectangle, enforce `preview` opacity and the `panel.frame` transparent center, and then perform packaging work. Those operations are deliberately not implemented here.
+`AUTHORING_TEMPLATE_SPEC.json` supplies slot ID, exact master origin, source/output size, alpha mode, scaling, and nine-slice metadata. The current builder reads this registration, validates the submitted master PNG, clips each registered rectangle, enforces `preview` opacity and the `panel.frame` transparent center, then produces and installs the internal package. The checked-in Adventure Journal proof follows this exact path.

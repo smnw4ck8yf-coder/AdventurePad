@@ -8,7 +8,7 @@
 - `trackpad.surface` uses 96 px suggested nine-slice edges. Do not put essential detail in the stretchable center.
 - LMB/RMB state guides are 528×224 with 48 px suggested nine-slice edges. Companion/Settings state guides are 264×112 with 24 px suggested edges. Supply label-free normal and pressed images; if pressed is missing, normal remains visible under native press feedback.
 - `bottom.split.background` is always below the runtime-sized mirror view. Do not paint an assumed fixed live-content hole into the source asset.
-- Companion, Notes, and Walkthrough backgrounds theme the lower display beneath the unchanged centered native page. Each slot falls back independently to native rendering when absent.
+- Companion, Notes, and Walkthrough backgrounds theme the lower display. Standard Interface Style keeps the centered opaque native page. Immersive may use exact Notes/Walkthrough artwork as the page beneath native dark text and controls; Companion stays standard. Each slot falls back independently to opaque native rendering when absent.
 - `panel.frame` must use nine-slice with a transparent center. Runtime deliberately omits its center patch and draws only the border around Companion-family pages.
 - `preview.png`: 1200×675, opaque, contain-safe. It is not used as application UI.
 - Every rendering asset is optional and falls back independently. Every referenced asset needs its exact SHA-256 in `skin.json`.

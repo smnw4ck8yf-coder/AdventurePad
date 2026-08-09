@@ -28,6 +28,8 @@ The split ratio ranges from 0.05 through 0.95, defaults to 0.75, and snaps to a 
 
 ## Companion, Notes, and Walkthrough
 
+Standard Interface Style places the existing opaque native page over these backgrounds. Immersive removes that pane only for Notes and Walkthrough when their exact artwork is installed; native layout, controls, scrolling, accessibility, and keyboard behavior do not move. Creators should keep the marked Notes editor and Walkthrough reading areas pale and low-contrast for dark native text. Companion remains Standard.
+
 These pages remain centered native overlays occupying 94% of the safe-drawing width and height. Their background assets theme the lower display beneath/around the unchanged page: `companion.background`, `notes.background`, and `walkthrough.background`. Each missing screen asset independently retains native rendering.
 
 - Companion uses `PageHeader`: 16 dp horizontal and 8 dp vertical padding, optional 48×48 dp-min back control, and a 48 dp-wide/56 dp-min close control. Home content scrolls with 16 dp padding and 8 dp card gaps.

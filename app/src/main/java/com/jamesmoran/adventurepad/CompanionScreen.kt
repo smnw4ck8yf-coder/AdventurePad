@@ -30,13 +30,16 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -97,6 +100,10 @@ internal val COMPANION_BACK_ARROW_SIZE = 28.sp
 internal val WALKTHROUGH_SEARCH_ARROW_SIZE = 24.sp
 internal val WALKTHROUGH_IMPORT_PREVIEW_ORDER = listOf("SUMMARY", "ACTIONS", "PREVIEW")
 internal val WALKTHROUGH_PASTE_ORDER = listOf("TITLE", "ANALYSE", "TEXT")
+private val ImmersiveInk = Color(0xFF322317)
+private val ImmersiveSecondaryInk = Color(0xFF66503A)
+private val ImmersiveOutline = Color(0x995E452E)
+private val ImmersiveControlScrim = Color(0x38FFF4D6)
 
 @Composable
 internal fun CompanionScreen(
@@ -104,6 +111,7 @@ internal fun CompanionScreen(
     persistedNotes: String,
     walkthrough: WalkthroughDocument?,
     selectedSection: CompanionSection,
+    immersive: Boolean = false,
     statistics: CompanionStatistics,
     onNotesChanged: (String) -> Unit,
     onSaveWalkthroughToNotes: (String, String?) -> Unit,
@@ -123,52 +131,62 @@ internal fun CompanionScreen(
         lastPersistedNotes = persistedNotes
     }
 
-    Surface(color = AdventurePadThemeTokens.colors.background, modifier = modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            if (selectedSection != CompanionSection.WALKTHROUGH) {
-                PageHeader(
-                    title = if (selectedSection == CompanionSection.HOME) "COMPANION" else selectedSection.label.uppercase(),
-                    showBack = selectedSection != CompanionSection.HOME,
-                    onBack = onBack,
-                    onClose = onClose,
-                )
-                HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
-            }
-            Box(Modifier.fillMaxSize()) {
-                when (selectedSection) {
-                    CompanionSection.HOME -> CompanionHome(onSectionSelected)
-                    CompanionSection.NOTES -> if (!isCompanionTargetAvailable(gameId)) {
-                        PlaceholderSection(
-                            "Notes",
-                            "Unavailable\n\nGameId='$gameId'\nAvailable=${isCompanionTargetAvailable(gameId)}",
-                        )
-                    } else {
-                        NotesSection(notesDraft) {
-                            notesDraft = it
-                            onNotesChanged(it)
-                        }
-                    }
-                    CompanionSection.WALKTHROUGH -> WalkthroughPage(
-                        gameId = gameId,
-                        document = walkthrough,
-                        onImported = onWalkthroughImported,
-                        onRemoved = onWalkthroughRemoved,
-                        onSaveToNotes = onSaveWalkthroughToNotes,
-                        onPositionChanged = onWalkthroughPositionChanged,
-                        onPreferencesChanged = onWalkthroughPreferencesChanged,
+    Surface(
+        color = if (immersive) Color.Transparent else AdventurePadThemeTokens.colors.background,
+        contentColor = if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.textPrimary,
+        modifier = modifier.fillMaxSize(),
+    ) {
+        CompositionLocalProvider(
+            LocalContentColor provides if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.textPrimary,
+        ) {
+            Column(Modifier.fillMaxSize()) {
+                if (selectedSection != CompanionSection.WALKTHROUGH) {
+                    PageHeader(
+                        title = if (selectedSection == CompanionSection.HOME) "COMPANION" else selectedSection.label.uppercase(),
+                        showBack = selectedSection != CompanionSection.HOME,
+                        immersive = immersive,
                         onBack = onBack,
                         onClose = onClose,
                     )
-                    CompanionSection.MANUAL -> PlaceholderSection(
-                        "Manual",
-                        "No manual added for this game.",
-                        "Original manual pages, maps, and preservation material will appear here when supplied by the user.",
-                    )
-                    CompanionSection.DIALOGUE -> PlaceholderSection(
-                        "Recent Dialogue",
-                        "Recent dialogue will appear here when dialogue capture support is added.",
-                    )
-                    CompanionSection.STATISTICS -> StatisticsSection(statistics)
+                    HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
+                }
+                Box(Modifier.fillMaxSize()) {
+                    when (selectedSection) {
+                        CompanionSection.HOME -> CompanionHome(onSectionSelected)
+                        CompanionSection.NOTES -> if (!isCompanionTargetAvailable(gameId)) {
+                            PlaceholderSection(
+                                "Notes",
+                                "Unavailable\n\nGameId='$gameId'\nAvailable=${isCompanionTargetAvailable(gameId)}",
+                            )
+                        } else {
+                            NotesSection(notesDraft, immersive) {
+                                notesDraft = it
+                                onNotesChanged(it)
+                            }
+                        }
+                        CompanionSection.WALKTHROUGH -> WalkthroughPage(
+                            gameId = gameId,
+                            document = walkthrough,
+                            onImported = onWalkthroughImported,
+                            onRemoved = onWalkthroughRemoved,
+                            onSaveToNotes = onSaveWalkthroughToNotes,
+                            onPositionChanged = onWalkthroughPositionChanged,
+                            onPreferencesChanged = onWalkthroughPreferencesChanged,
+                            onBack = onBack,
+                            onClose = onClose,
+                            immersive = immersive,
+                        )
+                        CompanionSection.MANUAL -> PlaceholderSection(
+                            "Manual",
+                            "No manual added for this game.",
+                            "Original manual pages, maps, and preservation material will appear here when supplied by the user.",
+                        )
+                        CompanionSection.DIALOGUE -> PlaceholderSection(
+                            "Recent Dialogue",
+                            "Recent dialogue will appear here when dialogue capture support is added.",
+                        )
+                        CompanionSection.STATISTICS -> StatisticsSection(statistics)
+                    }
                 }
             }
         }
@@ -180,6 +198,7 @@ internal fun PageHeader(
     title: String,
     modifier: Modifier = Modifier,
     showBack: Boolean = false,
+    immersive: Boolean = false,
     onBack: () -> Unit = {},
     onClose: () -> Unit,
 ) {
@@ -204,14 +223,16 @@ internal fun PageHeader(
         }
         Text(
             title,
-            color = AdventurePadThemeTokens.colors.textPrimary,
+            color = if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.textPrimary,
             style = MaterialTheme.typography.titleLarge,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.weight(1f),
         )
         TextButton(
             onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
+            ),
             modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
                 .semantics { contentDescription = "Close" },
         ) { Text(WALKTHROUGH_CLOSE_LABEL) }
@@ -268,14 +289,18 @@ private fun CompanionHome(onOpen: (CompanionSection) -> Unit) {
 }
 
 @Composable
-private fun NotesSection(notes: String, onNotesChanged: (String) -> Unit) {
+private fun NotesSection(notes: String, immersive: Boolean, onNotesChanged: (String) -> Unit) {
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
     Column(
         Modifier.fillMaxSize().padding(AdventurePadDesign.contentPadding),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
     ) {
-        Text("Saved automatically for this game.", color = AdventurePadThemeTokens.colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Saved automatically for this game.",
+            color = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
+            style = MaterialTheme.typography.bodySmall,
+        )
         OutlinedTextField(
             value = notes,
             onValueChange = { onNotesChanged(it.take(MAX_NOTES_LENGTH)) },
@@ -289,6 +314,17 @@ private fun NotesSection(notes: String, onNotesChanged: (String) -> Unit) {
                     keyboardController?.hide()
                 }
             }),
+            colors = if (immersive) OutlinedTextFieldDefaults.colors(
+                focusedTextColor = ImmersiveInk,
+                unfocusedTextColor = ImmersiveInk,
+                focusedBorderColor = ImmersiveOutline,
+                unfocusedBorderColor = ImmersiveOutline,
+                cursorColor = ImmersiveInk,
+                focusedPlaceholderColor = ImmersiveSecondaryInk,
+                unfocusedPlaceholderColor = ImmersiveSecondaryInk,
+                focusedContainerColor = Color.Transparent,
+                unfocusedContainerColor = Color.Transparent,
+            ) else OutlinedTextFieldDefaults.colors(),
             modifier = Modifier.fillMaxWidth().weight(1f),
         )
     }
@@ -305,22 +341,24 @@ private fun WalkthroughPage(
     onPreferencesChanged: (WalkthroughReaderPreferences) -> Unit,
     onBack: () -> Unit,
     onClose: () -> Unit,
+    immersive: Boolean,
 ) {
     if (!isCompanionTargetAvailable(gameId)) {
         Column(Modifier.fillMaxSize()) {
-            WalkthroughToolbar(onBack = onBack, onClose = onClose)
+            WalkthroughToolbar(onBack = onBack, onClose = onClose, immersive = immersive)
             PlaceholderSection(
                 "Walkthrough",
                 "Unavailable\n\nGameId='$gameId'\nAvailable=${isCompanionTargetAvailable(gameId)}",
             )        }
     } else if (document == null) {
-        WalkthroughImporter(onImported, onBack, onClose)
+        WalkthroughImporter(onImported, onBack, onClose, immersive)
     } else {
         var replacing by rememberSaveable(gameId, document.importedAt) { mutableStateOf(false) }
         if (replacing) WalkthroughImporter(
             onImported = { imported -> onImported(imported); replacing = false },
             onBack = { replacing = false },
             onClose = onClose,
+            immersive = immersive,
         ) else WalkthroughReader(
             document = document,
             onReplace = { replacing = true },
@@ -330,6 +368,7 @@ private fun WalkthroughPage(
             onPreferencesChanged = onPreferencesChanged,
             onBack = onBack,
             onClose = onClose,
+            immersive = immersive,
         )
     }
 }
@@ -339,6 +378,7 @@ private fun WalkthroughImporter(
     onImported: (WalkthroughDocument) -> Unit,
     onBack: () -> Unit,
     onClose: () -> Unit,
+    immersive: Boolean,
 ) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
@@ -370,8 +410,8 @@ private fun WalkthroughImporter(
         }
     }
     Column(Modifier.fillMaxSize()) {
-        WalkthroughToolbar(onBack = onBack, onClose = onClose)
-        HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
+        WalkthroughToolbar(onBack = onBack, onClose = onClose, immersive = immersive)
+        HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
             verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingMd),
@@ -414,6 +454,15 @@ private fun WalkthroughImporter(
                             keyboardController?.hide()
                         }
                     }),
+                    colors = if (immersive) OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = ImmersiveInk,
+                        unfocusedTextColor = ImmersiveInk,
+                        focusedBorderColor = ImmersiveOutline,
+                        unfocusedBorderColor = ImmersiveOutline,
+                        cursorColor = ImmersiveInk,
+                        focusedContainerColor = ImmersiveControlScrim,
+                        unfocusedContainerColor = ImmersiveControlScrim,
+                    ) else OutlinedTextFieldDefaults.colors(),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 TextButton(onClick = { step = ImportStep.CHOOSE }) { Text("CANCEL") }
@@ -462,6 +511,7 @@ private fun WalkthroughReader(
     onPreferencesChanged: (WalkthroughReaderPreferences) -> Unit,
     onBack: () -> Unit,
     onClose: () -> Unit,
+    immersive: Boolean,
 ) {
     val scrollState = rememberScrollState()
     val density = LocalDensity.current
@@ -530,7 +580,13 @@ private fun WalkthroughReader(
     }
 
     val palette = AdventurePadThemeTokens.current.readerPalette(preferences.appearance)
-    Column(Modifier.fillMaxSize().background(AdventurePadThemeTokens.colors.background)) {
+    val readerForeground = if (immersive) ImmersiveInk else palette.foreground
+    val readerHeading = if (immersive) Color(0xFF71461F) else palette.heading
+    Column(
+        Modifier.fillMaxSize().background(
+            if (immersive) Color.Transparent else AdventurePadThemeTokens.colors.background,
+        ),
+    ) {
         val currentOffset by remember(document.rawText, scrollState) {
             derivedStateOf {
                 val layout = textLayout
@@ -586,6 +642,7 @@ private fun WalkthroughReader(
             },
             onMore = { showMore = true },
             onClose = onClose,
+            immersive = immersive,
         ) {
             DropdownMenu(expanded = showMore, onDismissRequest = { showMore = false }) {
                 DropdownMenuItem(
@@ -611,7 +668,7 @@ private fun WalkthroughReader(
                 )
             }
         }
-        HorizontalDivider(color = AdventurePadThemeTokens.colors.outline)
+        HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
         if (settingsState.isOpen) ReaderSettingsPanel(
             preferences = preferences,
             onAction = ::updateSettings,
@@ -634,6 +691,7 @@ private fun WalkthroughReader(
             },
             onResultSelected = { results.getOrNull(currentResult)?.let { jumpTo(it.offset, ReaderTargetAlignment.SEARCH_MATCH) } },
             onDismiss = { view = WalkthroughView.READER },
+            immersive = immersive,
         )
         if (view == WalkthroughView.CONTENTS) {
             ContentsPanel(
@@ -644,30 +702,33 @@ private fun WalkthroughReader(
                     view = WalkthroughView.READER
                     jumpTo(it.startOffset, ReaderTargetAlignment.HEADING)
                 },
+                immersive = immersive,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
             val activeResult = results.getOrNull(currentResult).takeIf { view == WalkthroughView.SEARCH }
             val readerComponents = AdventurePadThemeTokens.components
-            val styledText = remember(display, document.sections, palette, activeResult, readerComponents) {
+            val styledText = remember(
+                display, document.sections, palette, readerForeground, readerHeading, activeResult, readerComponents,
+            ) {
                 walkthroughReaderText(
                     display,
                     document.sections,
-                    palette.foreground,
-                    palette.heading,
+                    readerForeground,
+                    readerHeading,
                     readerComponents.onSearchHighlight,
                     readerComponents.searchHighlight,
                     activeResult,
                 )
             }
             Box(
-                Modifier.fillMaxSize().background(palette.background)
+                Modifier.fillMaxSize().background(if (immersive) Color.Transparent else palette.background)
                     .onSizeChanged { readerViewportHeight = it.height },
             ) {
                 SelectionContainer {
                     Text(
                         text = styledText,
-                        color = palette.foreground,
+                        color = readerForeground,
                         fontFamily = readerFontFamily(preferences.font),
                         fontSize = (16f * preferences.textScale).sp,
                         lineHeight = (21f * preferences.textScale * preferences.lineSpacingScale).sp,
@@ -691,14 +752,19 @@ private fun WalkthroughToolbar(
     onSearch: (() -> Unit)? = null,
     onContents: (() -> Unit)? = null,
     onMore: (() -> Unit)? = null,
+    immersive: Boolean = false,
     moreContent: @Composable (() -> Unit)? = null,
 ) {
+    val toolbarContentColor = if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.primary
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
+        Modifier.fillMaxWidth()
+            .background(if (immersive) ImmersiveControlScrim else Color.Transparent)
+            .padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         TextButton(
             onClick = onBack,
+            colors = ButtonDefaults.textButtonColors(contentColor = toolbarContentColor),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
             modifier = Modifier.align(Alignment.CenterVertically).width(48.dp).heightIn(min = 48.dp)
                 .semantics { contentDescription = "Back" },
@@ -719,16 +785,22 @@ private fun WalkthroughToolbar(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        onReader?.let { CompactToolbarButton("READER", "Show reader", it) }
-        onSearch?.let { CompactToolbarButton("SEARCH", "Search walkthrough", it) }
-        onContents?.let { CompactToolbarButton("CONTENTS", "Show contents", it) }
+        onReader?.let { CompactToolbarButton("READER", "Show reader", toolbarContentColor, it) }
+        onSearch?.let { CompactToolbarButton("SEARCH", "Search walkthrough", toolbarContentColor, it) }
+        onContents?.let { CompactToolbarButton("CONTENTS", "Show contents", toolbarContentColor, it) }
         if (onMore != null) Box {
-            TextButton(onClick = onMore, modifier = Modifier.heightIn(min = 40.dp)) { Text("⋯", fontSize = 22.sp) }
+            TextButton(
+                onClick = onMore,
+                colors = ButtonDefaults.textButtonColors(contentColor = toolbarContentColor),
+                modifier = Modifier.heightIn(min = 40.dp),
+            ) { Text("⋯", fontSize = 22.sp) }
             moreContent?.invoke()
         }
         TextButton(
             onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
+            colors = ButtonDefaults.textButtonColors(
+                contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
+            ),
             modifier = Modifier.width(48.dp).heightIn(min = 48.dp)
                 .semantics { contentDescription = "Close walkthrough" },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
@@ -737,9 +809,10 @@ private fun WalkthroughToolbar(
 }
 
 @Composable
-private fun CompactToolbarButton(label: String, description: String, onClick: () -> Unit) {
+private fun CompactToolbarButton(label: String, description: String, color: Color, onClick: () -> Unit) {
     TextButton(
         onClick = onClick,
+        colors = ButtonDefaults.textButtonColors(contentColor = color),
         contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
         modifier = Modifier.heightIn(min = 40.dp).semantics { contentDescription = description },
     ) { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
@@ -831,9 +904,12 @@ private fun WalkthroughSearchBar(
     onNext: () -> Unit,
     onResultSelected: () -> Unit,
     onDismiss: () -> Unit,
+    immersive: Boolean,
 ) {
     Column(
-        Modifier.fillMaxWidth().padding(horizontal = AdventurePadDesign.spacingMd, vertical = AdventurePadDesign.spacingXs),
+        Modifier.fillMaxWidth()
+            .background(if (immersive) ImmersiveControlScrim else Color.Transparent)
+            .padding(horizontal = AdventurePadDesign.spacingMd, vertical = AdventurePadDesign.spacingXs),
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -844,12 +920,23 @@ private fun WalkthroughSearchBar(
                 onValueChange = onQueryChanged,
                 placeholder = { Text("Search walkthrough") },
                 singleLine = true,
+                colors = if (immersive) OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = ImmersiveInk,
+                    unfocusedTextColor = ImmersiveInk,
+                    focusedBorderColor = ImmersiveOutline,
+                    unfocusedBorderColor = ImmersiveOutline,
+                    cursorColor = ImmersiveInk,
+                    focusedPlaceholderColor = ImmersiveSecondaryInk,
+                    unfocusedPlaceholderColor = ImmersiveSecondaryInk,
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                ) else OutlinedTextFieldDefaults.colors(),
                 modifier = Modifier.weight(1f),
             )
             Text(
                 if (query.isBlank()) "" else if (resultCount == 0) "0" else "${currentResult + 1}/$resultCount",
                 style = MaterialTheme.typography.bodySmall,
-                color = AdventurePadThemeTokens.colors.textSecondary,
+                color = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
             )
             TextButton(
                 enabled = resultCount > 0,
@@ -868,7 +955,7 @@ private fun WalkthroughSearchBar(
         result?.let {
             Text(
                 text = listOfNotNull(it.sectionTitle, it.snippet).joinToString(" · "),
-                color = AdventurePadThemeTokens.colors.textSecondary,
+                color = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
                 style = MaterialTheme.typography.bodySmall,
                 maxLines = 2,
                 modifier = Modifier.fillMaxWidth().clickable(onClick = onResultSelected)
@@ -920,6 +1007,7 @@ private fun ContentsPanel(
     collapsedIds: Set<String>,
     onToggle: (String) -> Unit,
     onJump: (WalkthroughSection) -> Unit,
+    immersive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val parents = sections.mapNotNull { it.parentId }.toSet()
@@ -940,7 +1028,13 @@ private fun ContentsPanel(
                 } else Spacer(Modifier.width(44.dp))
                 Text(
                     section.title,
-                    color = if (section.level == 1) AdventurePadThemeTokens.colors.primary else AdventurePadThemeTokens.colors.textPrimary,
+                    color = if (immersive) {
+                        if (section.level == 1) Color(0xFF71461F) else ImmersiveInk
+                    } else if (section.level == 1) {
+                        AdventurePadThemeTokens.colors.primary
+                    } else {
+                        AdventurePadThemeTokens.colors.textPrimary
+                    },
                     fontWeight = if (section.level == 1) FontWeight.Bold else FontWeight.Normal,
                     modifier = Modifier.weight(1f).clickable { onJump(section) }.padding(vertical = 10.dp),
                 )

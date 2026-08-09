@@ -179,26 +179,26 @@ def companion():
 
 
 def notes():
-    s, hh = page_frame("NOTES / notes.background", "Background sits beneath unchanged native page; editor remains keyboard-sensitive and native")
+    s, hh = page_frame("NOTES / notes.background", "Standard: opaque native page. Immersive: artwork is the page; native editor remains keyboard-sensitive")
     s.rect(55, 48, 96, 96, AMBER, "BACK 48 dp", .08, stroke=3)
     s.rect(1087, 48, 96, 112, AMBER, "CLOSE 48×56 dp", .08, stroke=3)
     y = 32 + hh + 32
     s.rect(69, y, 1102, 42, AMBER, "Auto-save message — contrast critical", .06, stroke=2)
     s.pattern_rect(69, y + 60, 1102, 740, "dynamic", CYAN, "OutlinedTextField: weight(1), minLines 8, scrollable text")
     s.rect(69, 780, 1102, 250, MAGENTA, "IME/keyboard may shrink this region upward (adjustResize)", .07, "18 10", 4)
-    s.note(300, 300, ["NATIVE TEXT SAFE AREA", "Content padding 16 dp; section gap 8 dp.", "Done is the keyboard IME action, not an in-page artwork button.", "Text/placeholder/cursor/outline must retain accessible contrast."], 640)
+    s.note(300, 300, ["IMMERSIVE TEXT SAFE AREA", "Keep this region pale and low contrast; native content padding is 16 dp.", "Done is the keyboard IME action, not an in-page artwork button.", "Text/placeholder/cursor/outline remain native and dark in Immersive."], 640)
     s.legend(1050)
     return s
 
 
 def walkthrough():
-    s, hh = page_frame("WALKTHROUGH — READER / walkthrough.background", "Background sits beneath unchanged page; toolbar and reader/search/contents remain native and conditional", True)
+    s, hh = page_frame("WALKTHROUGH — READER / walkthrough.background", "Standard: opaque native page. Immersive: artwork is the page; native controls remain conditional", True)
     buttons = [(53, 96, "BACK"), (560, 120, "READER"), (680, 120, "SEARCH"), (800, 144, "CONTENTS"), (944, 90, "MORE"), (1075, 108, "CLOSE")]
     for x, w, label in buttons:
         s.rect(x, 40, w, 96, AMBER, label, .065, stroke=2)
     s.rect(37, 144, 1166, 110, CYAN, "Optional settings/search bar — dynamic height", .05, "16 10", 4)
     s.pattern_rect(37, 144 + hh, 1166, 903 - hh, "dynamic", CYAN, "Reader / Contents / Search results — scrolling live content")
-    s.rect(69, 176 + hh, 1102, 820 - hh, RED, "Reading area: preserve text contrast; 16 dp H / 12 dp V padding", .035, stroke=3)
+    s.rect(69, 176 + hh, 1102, 820 - hh, RED, "Immersive reading area: keep pale/quiet; dark native text; 16 dp H / 12 dp V padding", .035, stroke=3)
     s.note(330, 430, ["TOOLBAR RULES", "Row padding 8 dp horizontal / 4 dp vertical; back/close 48×48 dp min.", "READER/SEARCH/CONTENTS are content-width, 40 dp min height.", "MORE is 40 dp min height; menus overlay dynamically.", "Search, contents and reader settings can add/reflow native UI."], 670)
     s.legend(1050)
     return s

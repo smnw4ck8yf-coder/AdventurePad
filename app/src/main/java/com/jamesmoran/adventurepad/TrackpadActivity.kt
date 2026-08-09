@@ -119,6 +119,7 @@ class TrackpadActivity : ComponentActivity() {
     private val touchProvenance = TrackpadTouchProvenance()
     private lateinit var pointerSpeedRepository: PointerSpeedRepository
     private lateinit var themePreferencesRepository: ThemePreferencesRepository
+    private lateinit var interfaceStylePreferencesRepository: InterfaceStylePreferencesRepository
     private lateinit var skinRepository: SkinRepository
     private lateinit var mirrorCropRepository: MirrorCropRepository
     private lateinit var displayModePreferencesRepository: DisplayModePreferencesRepository
@@ -183,6 +184,7 @@ class TrackpadActivity : ComponentActivity() {
         rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
         pointerSpeedRepository = PointerSpeedRepository.create(this, lifecycleScope)
         themePreferencesRepository = ThemePreferencesRepository.create(this, lifecycleScope)
+        interfaceStylePreferencesRepository = InterfaceStylePreferencesRepository.create(this, lifecycleScope)
         skinRepository = SkinRepository.get(this)
         mirrorCropRepository = MirrorCropRepository.create(this, lifecycleScope)
         displayModePreferencesRepository = DisplayModePreferencesRepository.create(this, lifecycleScope)
@@ -213,6 +215,7 @@ class TrackpadActivity : ComponentActivity() {
         setContent {
             val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
             val activeColourTheme by themePreferencesRepository.activeTheme.collectAsState()
+            val activeInterfaceStyle by interfaceStylePreferencesRepository.activeStyle.collectAsState()
             val skinCatalog by skinRepository.catalog.collectAsState()
             val skinSelectionRevision by skinRepository.selectionRevision.collectAsState()
             val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
@@ -281,6 +284,7 @@ class TrackpadActivity : ComponentActivity() {
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
                     activeColourTheme = activeColourTheme,
+                    interfaceStyle = activeInterfaceStyle,
                     activeSkin = activeSkin,
                     installedSkins = skinCatalog,
                     onPointerSpeedSelected = { selectedSpeed ->
@@ -290,6 +294,9 @@ class TrackpadActivity : ComponentActivity() {
                     },
                     onColourThemeSelected = { selectedTheme ->
                         lifecycleScope.launch { themePreferencesRepository.selectTheme(selectedTheme) }
+                    },
+                    onInterfaceStyleSelected = { selectedStyle ->
+                        lifecycleScope.launch { interfaceStylePreferencesRepository.selectStyle(selectedStyle) }
                     },
                     onSkinSelected = { skinId -> skinRepository.assignGameplaySkin(currentGameId, skinId) },
                     onAddSkin = {
@@ -1247,10 +1254,12 @@ private fun AdventurePadScreen(
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
     activeColourTheme: AdventurePadThemeDefinition,
+    interfaceStyle: InterfaceStyle,
     activeSkin: ResolvedSkin,
     installedSkins: List<InstalledSkin>,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
     onColourThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    onInterfaceStyleSelected: (InterfaceStyle) -> Unit,
     onSkinSelected: (String?) -> Unit,
     onAddSkin: () -> Unit,
     onRemoveSkin: (String) -> Boolean,
@@ -1386,6 +1395,15 @@ private fun AdventurePadScreen(
                     }
                 }
             Box(blockingModifier) {
+                val exactPageArtwork = activeSkin.resolveAssetSlot(
+                    *lowerPageBackgroundCandidates(activePage, companionSection, interfacePanelVisible),
+                ) != null
+                val paneTreatment = functionalPaneTreatment(
+                    interfaceStyle = interfaceStyle,
+                    page = activePage,
+                    companionSection = companionSection,
+                    hasExactArtwork = exactPageArtwork,
+                )
                 SkinArtwork(
                     lowerPageBackgroundCandidates(activePage, companionSection, interfacePanelVisible),
                     Modifier.fillMaxSize(),
@@ -1396,10 +1414,12 @@ private fun AdventurePadScreen(
                             .fillMaxSize()
                             .padding(COMPANION_SAFE_CONTENT_INSET_DP.dp)
                             .clip(AdventurePadThemeTokens.shapes.large)
-                            .border(
-                                1.dp,
-                                AdventurePadThemeTokens.colors.outline,
-                                AdventurePadThemeTokens.shapes.large,
+                            .then(
+                                if (paneTreatment == FunctionalPaneTreatment.OPAQUE) Modifier.border(
+                                    1.dp,
+                                    AdventurePadThemeTokens.colors.outline,
+                                    AdventurePadThemeTokens.shapes.large,
+                                ) else Modifier,
                             ),
                     ) {
                         CompanionScreen(
@@ -1407,6 +1427,7 @@ private fun AdventurePadScreen(
                             persistedNotes = persistedNotes,
                             walkthrough = walkthrough,
                             selectedSection = companionSection,
+                            immersive = paneTreatment == FunctionalPaneTreatment.IMMERSIVE,
                             statistics = CompanionStatistics(
                                 targetId = currentGameId,
                                 displayMode = displayMode,
@@ -1438,6 +1459,8 @@ private fun AdventurePadScreen(
                                 onPointerSpeedSelected = onPointerSpeedSelected,
                                 activeColourTheme = activeColourTheme,
                                 onColourThemeSelected = onColourThemeSelected,
+                                interfaceStyle = interfaceStyle,
+                                onInterfaceStyleSelected = onInterfaceStyleSelected,
                                 activeSkin = activeSkin,
                                 installedSkins = installedSkins,
                                 onSkinSelected = onSkinSelected,
@@ -1566,6 +1589,8 @@ private fun PointerSpeedSettings(
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
     activeColourTheme: AdventurePadThemeDefinition,
     onColourThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    interfaceStyle: InterfaceStyle,
+    onInterfaceStyleSelected: (InterfaceStyle) -> Unit,
     activeSkin: ResolvedSkin,
     installedSkins: List<InstalledSkin>,
     onSkinSelected: (String?) -> Unit,
@@ -1671,6 +1696,32 @@ private fun PointerSpeedSettings(
             style = MaterialTheme.typography.bodySmall,
         )
         SettingsSectionTitle("THEMES")
+        Text(
+            text = "Interface Style",
+            color = AdventurePadThemeTokens.colors.textPrimary,
+            fontWeight = FontWeight.Bold,
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            InterfaceStyle.entries.forEach { style ->
+                OutlinedButton(
+                    onClick = { onInterfaceStyleSelected(style) },
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (style == interfaceStyle) {
+                            AdventurePadThemeTokens.colors.surfacePressed
+                        } else {
+                            Color.Transparent
+                        },
+                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
+                    ),
+                    border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
+                    modifier = Modifier.weight(1f),
+                ) { Text(style.displayName) }
+            }
+        }
         OutlinedButton(
             onClick = { themeDialogVisible = true },
             colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),

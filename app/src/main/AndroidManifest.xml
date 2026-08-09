@@ -51,7 +51,8 @@
             android:permission="com.jamesmoran.adventurepad.permission.LAUNCH_TRACKPAD"
             android:resizeableActivity="true"
             android:taskAffinity="${applicationId}.trackpad"
-            android:theme="@style/Theme.AdventurePad" />
+            android:theme="@style/Theme.AdventurePad"
+            android:windowSoftInputMode="adjustResize" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

@@ -67,6 +67,30 @@ class ProofSkinBuilderTest(unittest.TestCase):
             with self.assertRaises(builder.BuildError):
                 builder.build_skin(master, spec_path, builder.PROOF_METADATA, root / "out.apskin")
 
+    def test_adventure_journal_notes_and_walkthrough_are_exact_registered_slices(self):
+        root = Path(__file__).resolve().parents[2]
+        spec = builder.load_spec(root / "skin-authoring" / "AUTHORING_TEMPLATE_SPEC.json")
+        width, height, master = builder.read_rgba_png(root / "proof-skin" / "AdventureJournal-source.png")
+        self.assertEqual((4720, 4040), (width, height))
+        expected_geometry = {
+            "notes.background": (1400, 1420, 1240, 1080),
+            "walkthrough.background": (2720, 1420, 1240, 1080),
+        }
+        for slot, geometry in expected_geometry.items():
+            region = next(item for item in spec["regions"] if item["slotId"] == slot)
+            self.assertEqual(
+                geometry,
+                (region["origin"]["x"], region["origin"]["y"], region["size"]["width"], region["size"]["height"]),
+            )
+            extracted_path = root / "proof-skin" / "adventure-journal-extracted" / builder.asset_path(slot)
+            out_width, out_height, extracted = builder.read_rgba_png(extracted_path)
+            self.assertEqual((1240, 1080), (out_width, out_height))
+            self.assertEqual(
+                builder.crop_rgba(master, width, *geometry),
+                extracted,
+                f"{slot} must come directly from the registered master-PNG crop",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

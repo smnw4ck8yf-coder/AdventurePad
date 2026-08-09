@@ -50,6 +50,28 @@ class SkinSurfaceContractTest {
     }
 
     @Test
+    fun onlyExactNotesAndWalkthroughArtworkCanBecomeImmersive() {
+        assertEquals(
+            FunctionalPaneTreatment.IMMERSIVE,
+            functionalPaneTreatment(
+                InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.NOTES, true,
+            ),
+        )
+        assertEquals(
+            FunctionalPaneTreatment.IMMERSIVE,
+            functionalPaneTreatment(
+                InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.WALKTHROUGH, true,
+            ),
+        )
+        listOf(
+            functionalPaneTreatment(InterfaceStyle.STANDARD, LowerScreenPage.COMPANION, CompanionSection.NOTES, true),
+            functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.NOTES, false),
+            functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.HOME, true),
+            functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.SETTINGS, CompanionSection.NOTES, true),
+        ).forEach { assertEquals(FunctionalPaneTreatment.OPAQUE, it) }
+    }
+
+    @Test
     fun companionFamilyUsesAReferenceSizedSafeInset() {
         assertEquals(16, COMPANION_SAFE_CONTENT_INSET_DP)
         // The documented 2 px/dp, 1240x1080 reference display leaves 32 px per edge.

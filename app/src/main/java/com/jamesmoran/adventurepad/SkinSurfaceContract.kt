@@ -28,3 +28,22 @@ internal fun lowerPageBackgroundCandidates(
     LowerScreenPage.COMPANION -> companionBackgroundCandidates(companionSection)
     LowerScreenPage.SETTINGS -> emptyArray()
 }
+
+internal enum class FunctionalPaneTreatment { OPAQUE, IMMERSIVE }
+
+/** Only the two proof surfaces may surrender their native opaque pane to exact skin artwork. */
+internal fun functionalPaneTreatment(
+    interfaceStyle: InterfaceStyle,
+    page: LowerScreenPage,
+    companionSection: CompanionSection,
+    hasExactArtwork: Boolean,
+): FunctionalPaneTreatment = if (
+    interfaceStyle == InterfaceStyle.IMMERSIVE &&
+    page == LowerScreenPage.COMPANION &&
+    companionSection in setOf(CompanionSection.NOTES, CompanionSection.WALKTHROUGH) &&
+    hasExactArtwork
+) {
+    FunctionalPaneTreatment.IMMERSIVE
+} else {
+    FunctionalPaneTreatment.OPAQUE
+}
