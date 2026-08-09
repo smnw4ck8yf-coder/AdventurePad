@@ -10,6 +10,12 @@ object AdventurePadDesign {
     val spacingLg = 16.dp
     val spacingXl = 24.dp
     val contentPadding = 16.dp
+    val launcherHeaderPadding = 24.dp
+    val launcherOuterMargin = 20.dp
+    val launcherGameCardWidth = 112.dp
+    val launcherGameBoxAspectRatio = 0.70f
+    val launcherGridSpacing = 20.dp
+    val launcherRowSpacing = 22.dp
     val utilityTouchTarget = 56.dp
     val trackpadOverlayMinimumHeight = 56.dp
     val trackpadOverlayMaximumHeight = 88.dp

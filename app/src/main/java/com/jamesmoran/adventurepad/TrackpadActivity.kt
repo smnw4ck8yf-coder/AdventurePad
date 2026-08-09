@@ -357,7 +357,7 @@ class TrackpadActivity : ComponentActivity() {
         mirrorHost?.deactivate()
         releaseAllMouseButtons("PAUSE")
         releaseForwardedGamepadKeys()
-        ScummVMInputClient.releaseJoystickAxes()
+        CursorDeltaCoordinator.releaseJoystickAxes()
         recordLifecycle("PAUSED")
         super.onPause()
     }
@@ -366,7 +366,7 @@ class TrackpadActivity : ComponentActivity() {
         releaseAllMouseButtons("STOP")
         recordLifecycle("STOPPED")
         releaseForwardedGamepadKeys()
-        ScummVMInputClient.releaseJoystickAxes()
+        CursorDeltaCoordinator.releaseJoystickAxes()
         ScummVMInputClient.unbind()
         ScummVMInputClient.setConnectionStateListener(null)
         ScummVMInputClient.setMirrorStatusListener(null)
@@ -738,7 +738,7 @@ class TrackpadActivity : ComponentActivity() {
         mirrorHost?.deactivate()
         releaseAllMouseButtons("NEW INTENT")
         releaseForwardedGamepadKeys()
-        ScummVMInputClient.releaseJoystickAxes()
+        CursorDeltaCoordinator.releaseJoystickAxes()
         setIntent(intent)
         receivedIntentFlags = intent.flags
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
@@ -823,7 +823,7 @@ class TrackpadActivity : ComponentActivity() {
                 if (event.keyCode in forwardedGamepadKeysDown) {
                     true
                 } else if (event.repeatCount == 0 &&
-                    ScummVMInputClient.sendGamepadKeyEvent(event.action, event.keyCode)
+                    CursorDeltaCoordinator.publishGamepadKey(event.action, event.keyCode)
                 ) {
                     forwardedGamepadKeysDown += event.keyCode
                     true
@@ -835,7 +835,7 @@ class TrackpadActivity : ComponentActivity() {
                 if (!forwardedGamepadKeysDown.remove(event.keyCode)) {
                     false
                 } else {
-                    ScummVMInputClient.sendGamepadKeyEvent(event.action, event.keyCode)
+                    CursorDeltaCoordinator.publishGamepadKey(event.action, event.keyCode)
                     true
                 }
             }
@@ -845,7 +845,7 @@ class TrackpadActivity : ComponentActivity() {
 
     private fun releaseForwardedGamepadKeys() {
         forwardedGamepadKeysDown.forEach { keyCode ->
-            ScummVMInputClient.sendGamepadKeyEvent(KeyEvent.ACTION_UP, keyCode)
+            CursorDeltaCoordinator.publishGamepadKey(KeyEvent.ACTION_UP, keyCode)
         }
         forwardedGamepadKeysDown.clear()
         resetTriggerChord()
@@ -1003,7 +1003,7 @@ class TrackpadActivity : ComponentActivity() {
         updateDragDiagnostics()
         if (sources.size > 1) return true
 
-        if (!ScummVMInputClient.sendButtonEvent(button.downEvent)) {
+        if (!CursorDeltaCoordinator.publishButton(button.downEvent)) {
             sources.remove(source)
             updateDragDiagnostics()
             return false
@@ -1021,7 +1021,7 @@ class TrackpadActivity : ComponentActivity() {
         updateDragDiagnostics()
         if (sources.isNotEmpty()) return true
 
-        ScummVMInputClient.sendButtonEvent(button.upEvent)
+        CursorDeltaCoordinator.publishButton(button.upEvent)
         updateMouseDiagnostics(button, isDown = false)
         return true
     }
@@ -1033,7 +1033,7 @@ class TrackpadActivity : ComponentActivity() {
             val sources = mouseButtonSources.getValue(button)
             if (sources.isNotEmpty()) {
                 sources.clear()
-                ScummVMInputClient.sendButtonEvent(button.upEvent)
+                CursorDeltaCoordinator.publishButton(button.upEvent)
                 updateMouseDiagnostics(button, isDown = false, reason = reason)
             }
         }
@@ -2133,6 +2133,9 @@ private fun TouchSurface(
                                 }
                                 gestureUpdate.diagnostics.forEach(onGestureDiagnostic)
                                 gestureUpdate.gesture?.let(onGesture)
+                                gestureUpdate.scrollDeltaY?.let {
+                                    CursorDeltaCoordinator.publishVerticalScroll(it)
+                                }
                                 if (provenanceTerminal) {
                                     touchProvenance.complete(
                                         activeSequenceToken,
@@ -2750,6 +2753,7 @@ internal class TrackpadGestureTracker(
     private var cancellationReported = false
     private var pendingMovementReported = false
     private var awaitingFirstDownAfterReset = true
+    private var previousTwoFingerCentroid: Offset? = null
 
     fun handle(
         event: PointerEvent,
@@ -2809,6 +2813,7 @@ internal class TrackpadGestureTracker(
                     }
                     clearPreviousTap()
                     state = GestureTrackingState.TWO_FINGER_PENDING
+                    previousTwoFingerCentroid = pressedCentroid(changes)
                     return GestureUpdate(cancelHold = true)
                 } else if (state == GestureTrackingState.SECOND_TAP_HOLD_PENDING ||
                     state == GestureTrackingState.DOUBLE_TAP_HOLD_ACTIVE
@@ -2872,10 +2877,34 @@ internal class TrackpadGestureTracker(
                         return cancel()
                     }
                     GestureTrackingState.TWO_FINGER_PENDING -> {
-                        if (pressedCount > 2 || hasPointerExceededTolerance(changes)) return cancel()
+                        if (pressedCount > 2) return cancel()
                         val elapsed = changes.maxOfOrNull { it.uptimeMillis }
                             ?.minus(downUptimeMillis) ?: 0L
+                        val centroid = pressedCentroid(changes) ?: return cancel()
+                        val initialCentroid = initialPositions.values.centroid() ?: return cancel()
+                        val displacement = centroid - initialCentroid
+                        if (displacement.getDistanceSquared() > touchSlopSquared) {
+                            if (kotlin.math.abs(displacement.y) < kotlin.math.abs(displacement.x)) {
+                                return cancel()
+                            }
+                            val previous = previousTwoFingerCentroid ?: initialCentroid
+                            previousTwoFingerCentroid = centroid
+                            state = GestureTrackingState.TWO_FINGER_SCROLLING
+                            return GestureUpdate(
+                                scrollDeltaY = centroid.y - previous.y,
+                                cancelHold = true,
+                                diagnostics = listOf("TWO-FINGER VERTICAL SCROLL STARTED"),
+                            )
+                        }
                         if (elapsed > twoFingerTapMaximumDurationMillis) return cancel()
+                    }
+                    GestureTrackingState.TWO_FINGER_SCROLLING -> {
+                        if (pressedCount != 2) return GestureUpdate()
+                        val centroid = pressedCentroid(changes) ?: return GestureUpdate()
+                        val previous = previousTwoFingerCentroid ?: centroid
+                        previousTwoFingerCentroid = centroid
+                        val deltaY = centroid.y - previous.y
+                        return GestureUpdate(scrollDeltaY = deltaY.takeUnless { it == 0f })
                     }
                     GestureTrackingState.CANCELLED,
                     GestureTrackingState.IDLE,
@@ -2940,6 +2969,7 @@ internal class TrackpadGestureTracker(
                             }
                         }
                         GestureTrackingState.SINGLE_MOVING -> null
+                        GestureTrackingState.TWO_FINGER_SCROLLING -> null
                         GestureTrackingState.CANCELLED -> reportCancellationOnce()
                         GestureTrackingState.IDLE -> null
                     }
@@ -3014,7 +3044,8 @@ internal class TrackpadGestureTracker(
     }
 
     fun isTwoFingerGesturePending(): Boolean =
-        state == GestureTrackingState.TWO_FINGER_PENDING
+        state == GestureTrackingState.TWO_FINGER_PENDING ||
+            state == GestureTrackingState.TWO_FINGER_SCROLLING
 
     fun invalidateFromProvenance(verdict: TouchReleaseVerdict): GestureUpdate =
         rejectRelease(verdict)
@@ -3025,6 +3056,14 @@ internal class TrackpadGestureTracker(
             initialPosition == null ||
                 pointer.distanceSquaredFrom(initialPosition) > touchSlopSquared
         }
+
+    private fun pressedCentroid(changes: List<PointerInputChange>): Offset? =
+        changes.asSequence().filter { it.pressed }.map { it.position }.toList().centroid()
+
+    private fun Collection<Offset>.centroid(): Offset? {
+        if (isEmpty()) return null
+        return Offset(sumOf { it.x.toDouble() }.toFloat() / size, sumOf { it.y.toDouble() }.toFloat() / size)
+    }
 
     private fun PointerInputChange.distanceSquaredFrom(position: Offset): Float =
         (this.position - position).getDistanceSquared()
@@ -3088,6 +3127,7 @@ internal class TrackpadGestureTracker(
         state = GestureTrackingState.IDLE
         cancellationReported = false
         pendingMovementReported = false
+        previousTwoFingerCentroid = null
     }
 
     private fun clearPreviousTap() {
@@ -3103,6 +3143,7 @@ internal data class GestureUpdate(
     val cancelHold: Boolean = false,
     val updateMovementBaseline: Boolean = false,
     val resetMovementBaseline: Boolean = false,
+    val scrollDeltaY: Float? = null,
     val diagnostics: List<String> = emptyList(),
 )
 
@@ -3113,6 +3154,7 @@ private enum class GestureTrackingState {
     DOUBLE_TAP_HOLD_ACTIVE,
     SINGLE_MOVING,
     TWO_FINGER_PENDING,
+    TWO_FINGER_SCROLLING,
     CANCELLED,
 }
 

@@ -34,6 +34,7 @@ internal object ScummVMInputClient {
     private const val MSG_RELATIVE_MOVE = 1
     private const val MSG_JOYSTICK_AXIS = 6
     private const val MSG_GAMEPAD_KEY = 7
+    private const val MSG_VERTICAL_SCROLL = 8
     private const val JOYSTICK_AXIS_MAX = 32767
     private const val ANDROID_JOYSTICK_DEAD_ZONE = 0.209f
     private const val JOYSTICK_HAT_SCALE = 0.66f
@@ -481,6 +482,22 @@ internal object ScummVMInputClient {
         }
     }
 
+    fun sendVerticalScroll(distance: Float): Boolean {
+        if (!distance.isFinite() || distance == 0f) return false
+        val messenger = remoteMessenger ?: return false
+        val message = Message.obtain(null, MSG_VERTICAL_SCROLL).apply {
+            arg1 = java.lang.Float.floatToIntBits(distance)
+        }
+        return try {
+            messenger.send(message)
+            true
+        } catch (exception: RemoteException) {
+            handleConnectionLoss("SCROLL SEND FAILED", replaceBinding = true)
+            Log.w(TAG, "Vertical scroll forwarding failed", exception)
+            false
+        }
+    }
+
     fun sendJoystickMotion(
         event: MotionEvent,
         onTriggerAxis: ((TriggerAxisValue) -> Unit)? = null,
@@ -538,6 +555,10 @@ internal object ScummVMInputClient {
     }
 
     fun sendJoystickAxisValue(value: TriggerAxisValue): Boolean {
+        return CursorDeltaCoordinator.publishJoystickAxis(value)
+    }
+
+    internal fun sendJoystickAxisValueToScummVM(value: TriggerAxisValue): Boolean {
         if (value.axisFlag == 0 || value.position !in -JOYSTICK_AXIS_MAX..JOYSTICK_AXIS_MAX) return false
         val messenger = remoteMessenger ?: return false
         val key = JoystickAxisKey(value.deviceId, value.axisFlag)

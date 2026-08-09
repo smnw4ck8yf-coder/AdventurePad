@@ -228,6 +228,25 @@ class TrackpadGestureProvenanceTest {
         assertFalse(repeatedCancel.gesture == TrackpadGesture.DOUBLE_TAP_HOLD_END)
     }
 
+    @Test
+    fun twoFingerVerticalMovementScrollsWithoutMovingPointerOrRightClicking() {
+        val tracker = tracker()
+        tracker.handle(press(100L, Offset(0f, 0f)))
+        tracker.handle(twoFingerPress(110L))
+
+        val scroll = tracker.handle(twoFingerMove(130L, y = 20f))
+        val continued = tracker.handle(twoFingerMove(150L, y = 27f))
+        val release = tracker.handle(
+            twoFingerRelease(170L, y = 27f),
+            acceptedRelease(sequenceId = 1),
+        )
+
+        assertEquals(20f, scroll.scrollDeltaY)
+        assertEquals(7f, continued.scrollDeltaY)
+        assertFalse(scroll.allowMovement)
+        assertFalse(release.gesture == TrackpadGesture.TWO_FINGER_RIGHT_CLICK)
+    }
+
     private fun tracker() = TrackpadGestureTracker(
         singleTapMaximumDurationMillis = 180L,
         twoFingerTapMaximumDurationMillis = 250L,
@@ -256,6 +275,44 @@ class TrackpadGestureProvenanceTest {
         position = position,
         pressed = false,
         previousPressed = true,
+    )
+
+    private fun twoFingerPress(time: Long) = PointerEvent(
+        listOf(
+            change(1L, time, Offset(0f, 0f), pressed = true, previousPressed = true),
+            change(2L, time, Offset(20f, 0f), pressed = true, previousPressed = false),
+        ),
+    )
+
+    private fun twoFingerMove(time: Long, y: Float) = PointerEvent(
+        listOf(
+            change(1L, time, Offset(0f, y), pressed = true, previousPressed = true),
+            change(2L, time, Offset(20f, y), pressed = true, previousPressed = true),
+        ),
+    )
+
+    private fun twoFingerRelease(time: Long, y: Float) = PointerEvent(
+        listOf(
+            change(1L, time, Offset(0f, y), pressed = false, previousPressed = true),
+            change(2L, time, Offset(20f, y), pressed = false, previousPressed = true),
+        ),
+    )
+
+    private fun change(
+        id: Long,
+        time: Long,
+        position: Offset,
+        pressed: Boolean,
+        previousPressed: Boolean,
+    ) = PointerInputChange(
+        id = PointerId(id),
+        uptimeMillis = time,
+        position = position,
+        pressed = pressed,
+        previousUptimeMillis = time - 10L,
+        previousPosition = if (previousPressed) position.copy(y = 0f) else position,
+        previousPressed = previousPressed,
+        isInitiallyConsumed = false,
     )
 
     private fun pointerEvent(

@@ -30,6 +30,11 @@ internal data class AdventurePadColors(
 
 internal data class AdventurePadComponentStyles(
     val subtleBorderWidth: Dp,
+    val launcherAccent: Color,
+    val launcherAccentDark: Color,
+    val launcherContent: Color,
+    val launcherCard: Color,
+    val launcherInk: Color,
     val trackpadBackground: Color,
     val topDisplayBackground: Color,
     val topCursor: Color,
@@ -100,6 +105,11 @@ internal object AdventurePadThemes {
         shapes = adventurePadShapes(8, 12, 16),
         components = AdventurePadComponentStyles(
             subtleBorderWidth = 1.dp,
+            launcherAccent = Color(0xFFF47A16),
+            launcherAccentDark = Color(0xFFB94D08),
+            launcherContent = Color(0xFFFFF3D8),
+            launcherCard = Color(0xFFFFE8BE),
+            launcherInk = Color(0xFF3B2819),
             trackpadBackground = Color(0xFF1A1F24),
             topDisplayBackground = Color(0xFF102A43),
             topCursor = Color(0xFFFFD166),
@@ -138,6 +148,11 @@ internal object AdventurePadThemes {
         shapes = adventurePadShapes(4, 8, 12),
         components = AdventurePadComponentStyles(
             subtleBorderWidth = 1.dp,
+            launcherAccent = Color(0xFF13869A),
+            launcherAccentDark = Color(0xFF075466),
+            launcherContent = Color(0xFFEAF6F5),
+            launcherCard = Color(0xFFD5ECE8),
+            launcherInk = Color(0xFF102A32),
             trackpadBackground = Color(0xFF0C2835),
             topDisplayBackground = Color(0xFF073642),
             topCursor = Color(0xFF62D6D1),
@@ -176,6 +191,11 @@ internal object AdventurePadThemes {
         shapes = adventurePadShapes(6, 10, 14),
         components = AdventurePadComponentStyles(
             subtleBorderWidth = 1.dp,
+            launcherAccent = Color(0xFFE97817),
+            launcherAccentDark = Color(0xFF9D430E),
+            launcherContent = Color(0xFFFFF0D0),
+            launcherCard = Color(0xFFF5D6A3),
+            launcherInk = Color(0xFF3B2415),
             trackpadBackground = Color(0xFF3A3532),
             topDisplayBackground = Color(0xFF2A211A),
             topCursor = Color(0xFFC99548),

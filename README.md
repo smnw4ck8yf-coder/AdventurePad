@@ -216,6 +216,17 @@ This issue is intentionally deferred for a future milestone.
 
 ---
 
-# Building
+## ❤️ Support AdventurePad
+
+AdventurePad is developed in my spare time.
+
+If you've enjoyed using it and would like to help fund future development, you can support the project here:
+
+☕ Buy me a coffee:
+https://buymeacoffee.com/YOURNAME
+
+Every contribution helps fund new features, testing hardware and ongoing development.
+
+Thank you for your support!
 
 ...

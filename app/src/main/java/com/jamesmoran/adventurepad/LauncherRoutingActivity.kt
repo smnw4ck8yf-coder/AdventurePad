@@ -1,21 +1,23 @@
 package com.jamesmoran.adventurepad
 
 import android.app.Activity
+import android.app.ActivityOptions
+import android.content.Intent
 import android.os.Bundle
-import android.widget.Toast
+import android.view.Display
 
-/** Routes launcher requests to the independently recoverable secondary-display trackpad task. */
+/** Routes the app icon to the top-display launcher and lower-display companion tasks. */
 class LauncherRoutingActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        val result = DualDisplayCoordinator.launchTrackpad(
-            activity = this,
-            reason = "AdventurePad launcher request",
-        )
-        if (!result.succeeded) {
-            Toast.makeText(applicationContext, result.message, Toast.LENGTH_LONG).show()
-        }
+        val launcherIntent = Intent(this, MainActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON, "AdventurePad launcher request")
+        val options = ActivityOptions.makeBasic()
+            .setLaunchDisplayId(Display.DEFAULT_DISPLAY)
+            .toBundle()
+        startActivity(launcherIntent, options)
         finish()
     }
 }
