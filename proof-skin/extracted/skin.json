@@ -1,0 +1,249 @@
+{
+  "formatVersion": 1,
+  "id": "org.adventurepad.proof.rainbow",
+  "name": "AdventurePad Rainbow Proof",
+  "author": "AdventurePad Development",
+  "packageVersion": "1.0.0",
+  "minimumAdventurePadVersionCode": 1,
+  "features": [
+    "lower-controls",
+    "upper-surround",
+    "companion-surfaces",
+    "button-states"
+  ],
+  "assets": {
+    "top.surround": {
+      "path": "assets/top/surround.png",
+      "scale": "fill",
+      "canvas": {
+        "width": 1920,
+        "height": 1080
+      },
+      "sha256": "9ff212c0b7b9fa782e4042ffb4496b8daf16c2f4ce3bb9126c2ba3412e27d2bb"
+    },
+    "bottom.trackpad.background": {
+      "path": "assets/bottom/trackpad/background.png",
+      "scale": "cover",
+      "canvas": {
+        "width": 1240,
+        "height": 1080
+      },
+      "sha256": "906f837c2de8fff7fab380bd3e0ec93befe299bcb8a366392e9d516927b932cf"
+    },
+    "bottom.split.background": {
+      "path": "assets/bottom/split/background.png",
+      "scale": "cover",
+      "canvas": {
+        "width": 1240,
+        "height": 1080
+      },
+      "sha256": "6a531d0f3d168a8d219651be0cd425e9480997126cd5de01af6e907266a6da7d"
+    },
+    "companion.background": {
+      "path": "assets/companion/background.png",
+      "scale": "cover",
+      "canvas": {
+        "width": 1240,
+        "height": 1080
+      },
+      "sha256": "a0905eed3aae4541ea6af67d9c63c392454e95c3fbd5351ab0f7e7a05d979e44"
+    },
+    "notes.background": {
+      "path": "assets/notes/background.png",
+      "scale": "cover",
+      "canvas": {
+        "width": 1240,
+        "height": 1080
+      },
+      "sha256": "bd2fd73193a7a0481e88a4c9cfd4ed99cd97afc567159523b5d4b1f7aaad18ce"
+    },
+    "walkthrough.background": {
+      "path": "assets/walkthrough/background.png",
+      "scale": "cover",
+      "canvas": {
+        "width": 1240,
+        "height": 1080
+      },
+      "sha256": "15e89e9820f545cc7afae1b0918568b93950bf2f08964f31ee3ecd96eda8b335"
+    },
+    "trackpad.surface": {
+      "path": "assets/trackpad/surface.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 1240,
+        "height": 720
+      },
+      "sha256": "3c796f7f7d5df68e4377f3d4fa42802b0e4411b800bc68d685315eb2e90a69d4",
+      "sliceInsets": {
+        "left": 96,
+        "top": 96,
+        "right": 96,
+        "bottom": 96
+      }
+    },
+    "panel.frame": {
+      "path": "assets/panel/frame.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 1240,
+        "height": 360
+      },
+      "sha256": "90848bde080a7eb42774ce1ff918c352ab9fe06924d1586b5978084e0a82ccc9",
+      "sliceInsets": {
+        "left": 64,
+        "top": 64,
+        "right": 64,
+        "bottom": 64
+      }
+    },
+    "preview": {
+      "path": "preview.png",
+      "scale": "contain",
+      "canvas": {
+        "width": 1200,
+        "height": 675
+      },
+      "sha256": "f5c27a9450087044bcb9f0be4ae0d1173733cabb4b155eb266544c0d014779f2"
+    },
+    "button.lmb.normal": {
+      "path": "assets/button/lmb/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 528,
+        "height": 224
+      },
+      "sha256": "5285f96ef2c37724cd8c6e58d97c0f9f12c1a94454a65eac92ea231563c7f8c3",
+      "sliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    "button.lmb.pressed": {
+      "path": "assets/button/lmb/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 528,
+        "height": 224
+      },
+      "sha256": "46046ae58b565287cc79eae1d66eb64792c7e6c8e55f4bf1ab0584f8076b4436",
+      "sliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    "button.rmb.normal": {
+      "path": "assets/button/rmb/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 528,
+        "height": 224
+      },
+      "sha256": "68add842aa8fc7c6bfc68bb416d7cc62473f65cbf73cbdd8120fde3837742ac3",
+      "sliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    "button.rmb.pressed": {
+      "path": "assets/button/rmb/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 528,
+        "height": 224
+      },
+      "sha256": "fc61f2cb3de77fea65a4fa9312cdc11f19122407438b623eb4128a1093e833da",
+      "sliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    "button.companion.normal": {
+      "path": "assets/button/companion/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 264,
+        "height": 112
+      },
+      "sha256": "72c5c5c3ea6b5ebc49ef7a67864550f7bd43759c8902c7004d6481d50d6ad55e",
+      "sliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    "button.companion.pressed": {
+      "path": "assets/button/companion/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 264,
+        "height": 112
+      },
+      "sha256": "c931985b28aef5c76825cfc31272bb1b6211310f5ae3a7586967f4da6d958b6d",
+      "sliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    "button.settings.normal": {
+      "path": "assets/button/settings/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 264,
+        "height": 112
+      },
+      "sha256": "335ba0b41558b0c77968634b44c052c2998151f37a4ca1adca2852a2e798a35a",
+      "sliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    "button.settings.pressed": {
+      "path": "assets/button/settings/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 264,
+        "height": 112
+      },
+      "sha256": "aa5b4466f9333f9fb58b69891e7bd316033cda757e7c46be0f7a2e2609680e56",
+      "sliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    }
+  },
+  "colors": {
+    "background": "#111417",
+    "surface": "#1A1F24",
+    "surfaceRaised": "#22282E",
+    "surfacePressed": "#303841",
+    "outline": "#46515B",
+    "outlineStrong": "#64717D",
+    "primary": "#D8B86A",
+    "onPrimary": "#211B0D",
+    "textPrimary": "#F2F3F5",
+    "textSecondary": "#ADB5BD"
+  },
+  "metrics": {
+    "spacingScale": 1.0,
+    "cornerScale": 1.0,
+    "borderScale": 1.0
+  },
+  "extensions": {
+    "authoringTemplateVersion": "1.0.0"
+  }
+}

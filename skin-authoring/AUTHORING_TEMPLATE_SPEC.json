@@ -1,0 +1,462 @@
+{
+  "schemaVersion": 1,
+  "templateVersion": "1.0.0",
+  "templateFile": "AdventurePad-Skin-Template-v1.svg",
+  "masterCanvas": {
+    "width": 4720,
+    "height": 4040,
+    "units": "px"
+  },
+  "coordinates": "Master-canvas pixels; origins are top-left; right and bottom are exclusive.",
+  "layerContract": {
+    "GUIDE_BACKGROUNDS": "Non-exporting artboard/reference backdrops placed below artwork for editing visibility.",
+    "ARTWORK": "Editable, label-free artist content. One child group per slot ID.",
+    "GUIDES": "Non-exporting geometry, safe/protected/dynamic regions, inset and nine-slice guides.",
+    "LABELS": "Non-exporting dimensions and explanatory/native-label annotations.",
+    "REGISTRATION": "Hidden machine-readable rectangles mirroring JSON registration data."
+  },
+  "sourceAuthority": [
+    "../skin-creator-kit/LAYOUT_SPEC.json",
+    "../skin-creator-kit/LAYOUT_SPEC.md",
+    "../skin-creator-kit/templates/",
+    "../docs/skins/SKIN_FORMAT_V1.md"
+  ],
+  "regions": [
+    {
+      "index": 1,
+      "slotId": "top.surround",
+      "svgArtworkGroupId": "top.surround",
+      "origin": {
+        "x": 80,
+        "y": 180
+      },
+      "size": {
+        "width": 1920,
+        "height": 1080
+      },
+      "output": {
+        "width": 1920,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba-runtime-clipped",
+      "scaleMode": "fill",
+      "requiredByRuntime": false,
+      "runtimeProtection": "Full artwork is exported; runtime clips the actual live-game viewport. Never author a transparent game-window hole."
+    },
+    {
+      "index": 2,
+      "slotId": "bottom.trackpad.background",
+      "svgArtworkGroupId": "bottom.trackpad.background",
+      "origin": {
+        "x": 2080,
+        "y": 180
+      },
+      "size": {
+        "width": 1240,
+        "height": 1080
+      },
+      "output": {
+        "width": 1240,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "cover",
+      "requiredByRuntime": false
+    },
+    {
+      "index": 3,
+      "slotId": "bottom.split.background",
+      "svgArtworkGroupId": "bottom.split.background",
+      "origin": {
+        "x": 3400,
+        "y": 180
+      },
+      "size": {
+        "width": 1240,
+        "height": 1080
+      },
+      "output": {
+        "width": 1240,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "cover",
+      "requiredByRuntime": false,
+      "runtimeProtection": "Full background is exported; the runtime-sized mirrored region is composited above it."
+    },
+    {
+      "index": 4,
+      "slotId": "companion.background",
+      "svgArtworkGroupId": "companion.background",
+      "origin": {
+        "x": 80,
+        "y": 1420
+      },
+      "size": {
+        "width": 1240,
+        "height": 1080
+      },
+      "output": {
+        "width": 1240,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "cover",
+      "requiredByRuntime": false
+    },
+    {
+      "index": 5,
+      "slotId": "notes.background",
+      "svgArtworkGroupId": "notes.background",
+      "origin": {
+        "x": 1400,
+        "y": 1420
+      },
+      "size": {
+        "width": 1240,
+        "height": 1080
+      },
+      "output": {
+        "width": 1240,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "cover",
+      "requiredByRuntime": false
+    },
+    {
+      "index": 6,
+      "slotId": "walkthrough.background",
+      "svgArtworkGroupId": "walkthrough.background",
+      "origin": {
+        "x": 2720,
+        "y": 1420
+      },
+      "size": {
+        "width": 1240,
+        "height": 1080
+      },
+      "output": {
+        "width": 1240,
+        "height": 1080,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "cover",
+      "requiredByRuntime": false
+    },
+    {
+      "index": 7,
+      "slotId": "trackpad.surface",
+      "svgArtworkGroupId": "trackpad.surface",
+      "origin": {
+        "x": 80,
+        "y": 2660
+      },
+      "size": {
+        "width": 1240,
+        "height": 720
+      },
+      "output": {
+        "width": 1240,
+        "height": 720,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 96,
+        "top": 96,
+        "right": 96,
+        "bottom": 96
+      }
+    },
+    {
+      "index": 8,
+      "slotId": "panel.frame",
+      "svgArtworkGroupId": "panel.frame",
+      "origin": {
+        "x": 1400,
+        "y": 2660
+      },
+      "size": {
+        "width": 1240,
+        "height": 360
+      },
+      "output": {
+        "width": 1240,
+        "height": 360,
+        "format": "png"
+      },
+      "alphaMode": "rgba-transparent-center",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 64,
+        "top": 64,
+        "right": 64,
+        "bottom": 64
+      },
+      "transparentCenter": {
+        "x": 64,
+        "y": 64,
+        "width": 1112,
+        "height": 232,
+        "requiredAlpha": 0
+      }
+    },
+    {
+      "index": 9,
+      "slotId": "preview",
+      "svgArtworkGroupId": "preview",
+      "origin": {
+        "x": 2720,
+        "y": 2660
+      },
+      "size": {
+        "width": 1200,
+        "height": 675
+      },
+      "output": {
+        "width": 1200,
+        "height": 675,
+        "format": "png"
+      },
+      "alphaMode": "opaque",
+      "scaleMode": "contain",
+      "requiredByRuntime": true
+    },
+    {
+      "index": 10,
+      "slotId": "button.lmb.normal",
+      "svgArtworkGroupId": "button.lmb.normal",
+      "origin": {
+        "x": 80,
+        "y": 3560
+      },
+      "size": {
+        "width": 528,
+        "height": 224
+      },
+      "output": {
+        "width": 528,
+        "height": 224,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    {
+      "index": 11,
+      "slotId": "button.lmb.pressed",
+      "svgArtworkGroupId": "button.lmb.pressed",
+      "origin": {
+        "x": 688,
+        "y": 3560
+      },
+      "size": {
+        "width": 528,
+        "height": 224
+      },
+      "output": {
+        "width": 528,
+        "height": 224,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    {
+      "index": 12,
+      "slotId": "button.rmb.normal",
+      "svgArtworkGroupId": "button.rmb.normal",
+      "origin": {
+        "x": 1296,
+        "y": 3560
+      },
+      "size": {
+        "width": 528,
+        "height": 224
+      },
+      "output": {
+        "width": 528,
+        "height": 224,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    {
+      "index": 13,
+      "slotId": "button.rmb.pressed",
+      "svgArtworkGroupId": "button.rmb.pressed",
+      "origin": {
+        "x": 1904,
+        "y": 3560
+      },
+      "size": {
+        "width": 528,
+        "height": 224
+      },
+      "output": {
+        "width": 528,
+        "height": 224,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 48,
+        "top": 48,
+        "right": 48,
+        "bottom": 48
+      }
+    },
+    {
+      "index": 14,
+      "slotId": "button.companion.normal",
+      "svgArtworkGroupId": "button.companion.normal",
+      "origin": {
+        "x": 2512,
+        "y": 3560
+      },
+      "size": {
+        "width": 264,
+        "height": 112
+      },
+      "output": {
+        "width": 264,
+        "height": 112,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    {
+      "index": 15,
+      "slotId": "button.companion.pressed",
+      "svgArtworkGroupId": "button.companion.pressed",
+      "origin": {
+        "x": 2856,
+        "y": 3560
+      },
+      "size": {
+        "width": 264,
+        "height": 112
+      },
+      "output": {
+        "width": 264,
+        "height": 112,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    {
+      "index": 16,
+      "slotId": "button.settings.normal",
+      "svgArtworkGroupId": "button.settings.normal",
+      "origin": {
+        "x": 3200,
+        "y": 3560
+      },
+      "size": {
+        "width": 264,
+        "height": 112
+      },
+      "output": {
+        "width": 264,
+        "height": 112,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    },
+    {
+      "index": 17,
+      "slotId": "button.settings.pressed",
+      "svgArtworkGroupId": "button.settings.pressed",
+      "origin": {
+        "x": 3544,
+        "y": 3560
+      },
+      "size": {
+        "width": 264,
+        "height": 112
+      },
+      "output": {
+        "width": 264,
+        "height": 112,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 24,
+        "top": 24,
+        "right": 24,
+        "bottom": 24
+      }
+    }
+  ],
+  "excludedRuntimeSlots": {
+    "launcher.background": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
+    "launcher.header": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
+    "launcher.brand": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope."
+  },
+  "legacySlotsExcluded": [
+    "bottom.background",
+    "trackpad.button.left",
+    "trackpad.button.right"
+  ]
+}

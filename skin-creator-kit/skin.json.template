@@ -1,0 +1,34 @@
+{
+  "formatVersion": 1,
+  "id": "org.example.replace-me",
+  "name": "Replace Me",
+  "author": "Replace Me",
+  "packageVersion": "1.0.0",
+  "minimumAdventurePadVersionCode": 1,
+  "features": ["lower-controls", "upper-surround", "companion-surfaces", "button-states"],
+  "assets": {
+    "top.surround": {"path": "assets/top/surround.png", "scale": "fill", "canvas": {"width": 1920, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "bottom.trackpad.background": {"path": "assets/bottom/trackpad-background.png", "scale": "cover", "canvas": {"width": 1240, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "bottom.split.background": {"path": "assets/bottom/split-background.png", "scale": "cover", "canvas": {"width": 1240, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "companion.background": {"path": "assets/companion/background.png", "scale": "cover", "canvas": {"width": 1240, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "notes.background": {"path": "assets/notes/background.png", "scale": "cover", "canvas": {"width": 1240, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "walkthrough.background": {"path": "assets/walkthrough/background.png", "scale": "cover", "canvas": {"width": 1240, "height": 1080}, "sha256": "REPLACE_WITH_SHA256"},
+    "trackpad.surface": {"path": "assets/trackpad/surface.png", "scale": "nineSlice", "sliceInsets": {"left": 96, "top": 96, "right": 96, "bottom": 96}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.lmb.normal": {"path": "assets/buttons/lmb-normal.png", "scale": "nineSlice", "canvas": {"width": 528, "height": 224}, "sliceInsets": {"left": 48, "top": 48, "right": 48, "bottom": 48}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.lmb.pressed": {"path": "assets/buttons/lmb-pressed.png", "scale": "nineSlice", "canvas": {"width": 528, "height": 224}, "sliceInsets": {"left": 48, "top": 48, "right": 48, "bottom": 48}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.rmb.normal": {"path": "assets/buttons/rmb-normal.png", "scale": "nineSlice", "canvas": {"width": 528, "height": 224}, "sliceInsets": {"left": 48, "top": 48, "right": 48, "bottom": 48}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.rmb.pressed": {"path": "assets/buttons/rmb-pressed.png", "scale": "nineSlice", "canvas": {"width": 528, "height": 224}, "sliceInsets": {"left": 48, "top": 48, "right": 48, "bottom": 48}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.companion.normal": {"path": "assets/buttons/companion-normal.png", "scale": "nineSlice", "canvas": {"width": 264, "height": 112}, "sliceInsets": {"left": 24, "top": 24, "right": 24, "bottom": 24}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.companion.pressed": {"path": "assets/buttons/companion-pressed.png", "scale": "nineSlice", "canvas": {"width": 264, "height": 112}, "sliceInsets": {"left": 24, "top": 24, "right": 24, "bottom": 24}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.settings.normal": {"path": "assets/buttons/settings-normal.png", "scale": "nineSlice", "canvas": {"width": 264, "height": 112}, "sliceInsets": {"left": 24, "top": 24, "right": 24, "bottom": 24}, "sha256": "REPLACE_WITH_SHA256"},
+    "button.settings.pressed": {"path": "assets/buttons/settings-pressed.png", "scale": "nineSlice", "canvas": {"width": 264, "height": 112}, "sliceInsets": {"left": 24, "top": 24, "right": 24, "bottom": 24}, "sha256": "REPLACE_WITH_SHA256"},
+    "panel.frame": {"path": "assets/panels/frame.png", "scale": "nineSlice", "canvas": {"width": 1240, "height": 360}, "sliceInsets": {"left": 64, "top": 64, "right": 64, "bottom": 64}, "sha256": "REPLACE_WITH_SHA256"}
+  },
+  "colors": {
+    "background": "#111417", "surface": "#1A1F24", "surfaceRaised": "#22282E",
+    "surfacePressed": "#303841", "outline": "#46515B", "primary": "#D8B86A",
+    "onPrimary": "#211B0D", "textPrimary": "#F2F3F5", "textSecondary": "#ADB5BD"
+  },
+  "metrics": {"spacingScale": 1.0, "cornerScale": 1.0, "borderScale": 1.0},
+  "extensions": {}
+}

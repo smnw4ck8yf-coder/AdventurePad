@@ -15,13 +15,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.lifecycleScope
-import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import kotlinx.coroutines.launch
 
 /** Top-display AdventurePad facade backed directly by ScummVM's configured targets. */
 class MainActivity : ComponentActivity() {
     private lateinit var libraryClient: ScummVMLibraryClient
-    private lateinit var themePreferencesRepository: ThemePreferencesRepository
+    private lateinit var skinRepository: SkinRepository
     private lateinit var launcherLibraryMetadataRepository: LauncherLibraryMetadataRepository
     private lateinit var launcherPointerInput: LauncherPointerInput
     private var libraryState by mutableStateOf(ScummVMLibraryState())
@@ -30,13 +29,13 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        themePreferencesRepository = ThemePreferencesRepository.create(this, lifecycleScope)
+        skinRepository = SkinRepository.get(this)
         launcherLibraryMetadataRepository = LauncherLibraryMetadataRepository.create(this, lifecycleScope)
         launcherPointerInput = LauncherPointerInput(this)
         libraryClient = ScummVMLibraryClient(this) { libraryState = it }
 
         setContent {
-            val activeTheme by themePreferencesRepository.activeTheme.collectAsState()
+            val skinCatalog by skinRepository.catalog.collectAsState()
             val launcherMetadata by launcherLibraryMetadataRepository.metadata.collectAsState()
             LaunchedEffect(
                 libraryState.targets,
@@ -53,7 +52,8 @@ class MainActivity : ComponentActivity() {
                     )
                 }
             }
-            AdventurePadTheme(theme = activeTheme) {
+            val launcherSkin = skinRepository.resolve(SkinContext.LAUNCHER)
+            AdventurePadSkinTheme(skin = launcherSkin) {
                 Box(modifier = Modifier.fillMaxSize()) {
                     AdventurePadLauncherScreen(
                         state = libraryState,

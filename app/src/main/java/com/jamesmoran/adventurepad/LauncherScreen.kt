@@ -140,6 +140,7 @@ internal fun AdventurePadLauncherScreen(
                 }
             },
     ) {
+        SkinArtwork(SkinSlots.LAUNCHER_BACKGROUND, Modifier.fillMaxSize())
         Column(
             modifier = Modifier.fillMaxSize(),
         ) {

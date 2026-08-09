@@ -63,7 +63,8 @@ internal fun GameplayUtilityAction.displayLabel(): String = when (this) {
 }
 
 internal const val GAMEPLAY_UTILITY_MIN_TOUCH_TARGET_DP = 56
-internal const val LOWER_PAGE_FRACTION = 0.94f
+internal const val APPLICATION_PAGE_FRACTION = 0.94f
+internal const val COMPANION_SAFE_CONTENT_INSET_DP = 16
 
 internal val PermanentGameplayUtilityActions = GameplayUtilityAction.entries.toList()
 

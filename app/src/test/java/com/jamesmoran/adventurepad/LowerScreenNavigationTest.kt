@@ -100,6 +100,6 @@ class LowerScreenNavigationTest {
             AdventurePadDesign.utilityTouchTarget.value,
             0f,
         )
-        assertTrue(LOWER_PAGE_FRACTION in 0.92f..0.95f)
+        assertTrue(APPLICATION_PAGE_FRACTION in 0.92f..0.95f)
     }
 }

@@ -13,12 +13,16 @@ import android.util.Log
 import android.view.Display
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,11 +32,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ButtonDefaults
@@ -72,15 +78,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
+import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeDefinition
-import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemes
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.sqrt
 
@@ -111,6 +119,7 @@ class TrackpadActivity : ComponentActivity() {
     private val touchProvenance = TrackpadTouchProvenance()
     private lateinit var pointerSpeedRepository: PointerSpeedRepository
     private lateinit var themePreferencesRepository: ThemePreferencesRepository
+    private lateinit var skinRepository: SkinRepository
     private lateinit var mirrorCropRepository: MirrorCropRepository
     private lateinit var displayModePreferencesRepository: DisplayModePreferencesRepository
     private lateinit var companionNotesRepository: CompanionNotesRepository
@@ -119,6 +128,7 @@ class TrackpadActivity : ComponentActivity() {
     private var pendingCropTargetId: String? = null
     private var cropTargetHandoffJob: Job? = null
     private var companionTargetId by mutableStateOf("")
+    private var lowerSkinContext by mutableStateOf(SkinContext.GAMEPLAY)
     private var mirrorCursorState by mutableStateOf(MirrorCursorState())
     private var cropEditorModel by mutableStateOf<CropEditorModel?>(null)
     private var cropEditorVisible by mutableStateOf(false)
@@ -163,6 +173,7 @@ class TrackpadActivity : ComponentActivity() {
         Log.i("AdventurePadTarget", "TrackpadActivity onCreate")
 
         receivedIntentFlags = intent.flags
+        lowerSkinContext = intent.skinContextOr(SkinContext.GAMEPLAY)
         currentDisplayId = display?.displayId ?: Display.INVALID_DISPLAY
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
             ?.let { "Launched because: $it" }
@@ -172,6 +183,7 @@ class TrackpadActivity : ComponentActivity() {
         rawTouchDiagnostics.reset(gestureResetGeneration, "CREATE")
         pointerSpeedRepository = PointerSpeedRepository.create(this, lifecycleScope)
         themePreferencesRepository = ThemePreferencesRepository.create(this, lifecycleScope)
+        skinRepository = SkinRepository.get(this)
         mirrorCropRepository = MirrorCropRepository.create(this, lifecycleScope)
         displayModePreferencesRepository = DisplayModePreferencesRepository.create(this, lifecycleScope)
         companionNotesRepository = CompanionNotesRepository.create(this, lifecycleScope)
@@ -200,17 +212,47 @@ class TrackpadActivity : ComponentActivity() {
 
         setContent {
             val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
-            val activeTheme by themePreferencesRepository.activeTheme.collectAsState()
+            val activeColourTheme by themePreferencesRepository.activeTheme.collectAsState()
+            val skinCatalog by skinRepository.catalog.collectAsState()
+            val skinSelectionRevision by skinRepository.selectionRevision.collectAsState()
             val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
             val cropSelection by mirrorCropRepository.selection.collectAsState()
             val notesSelection by companionNotesRepository.selection.collectAsState()
             val walkthroughSelection by walkthroughRepository.selection.collectAsState()
             val cropProfile = cropSelection.profile
             val currentGameId = companionTargetId
+            val activeSkin = remember(
+                lowerSkinContext,
+                currentGameId,
+                skinCatalog,
+                skinSelectionRevision,
+                activeColourTheme,
+            ) {
+                skinRepository.resolve(lowerSkinContext, currentGameId, activeColourTheme)
+            }
+            var pendingCreatedSkin by remember { mutableStateOf<InstalledSkin?>(null) }
+            var skinBuildError by remember { mutableStateOf<String?>(null) }
+            val addSkinLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+                if (uri != null) lifecycleScope.launch {
+                    runCatching {
+                        withContext(Dispatchers.IO) {
+                            skinRepository.buildFromMasterPng(uri).installedSkin
+                        }
+                    }.onSuccess {
+                        skinRepository.refresh()
+                        pendingCreatedSkin = it
+                    }.onFailure {
+                        skinBuildError = it.message ?: "Skin creation failed"
+                    }
+                }
+            }
             val currentNotes = notesSelection.notes.takeIf { notesSelection.gameId == currentGameId }.orEmpty()
             val currentWalkthrough = walkthroughSelection.document
                 .takeIf { walkthroughSelection.gameId == currentGameId }
-            AdventurePadTheme(theme = activeTheme) {
+            AdventurePadSkinTheme(
+                skin = activeSkin,
+                nativeTheme = nativeThemeForGameSkin(activeColourTheme, activeSkin),
+            ) {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
                     displayId = currentDisplayId,
@@ -237,17 +279,22 @@ class TrackpadActivity : ComponentActivity() {
                     gestureResetGeneration = gestureResetGeneration,
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
-                    activeTheme = activeTheme,
+                    activeColourTheme = activeColourTheme,
+                    activeSkin = activeSkin,
+                    installedSkins = skinCatalog,
                     onPointerSpeedSelected = { selectedSpeed ->
                         lifecycleScope.launch {
                             pointerSpeedRepository.setPointerSpeed(selectedSpeed)
                         }
                     },
-                    onThemeSelected = { selectedTheme ->
-                        lifecycleScope.launch {
-                            themePreferencesRepository.selectTheme(selectedTheme)
-                        }
+                    onColourThemeSelected = { selectedTheme ->
+                        lifecycleScope.launch { themePreferencesRepository.selectTheme(selectedTheme) }
                     },
+                    onSkinSelected = { skinId -> skinRepository.assignGameplaySkin(currentGameId, skinId) },
+                    onAddSkin = {
+                        addSkinLauncher.launch(arrayOf("image/png"))
+                    },
+                    onRemoveSkin = { skinRepository.remove(it) },
                     onNotesChanged = { notes ->
                         lifecycleScope.launch { companionNotesRepository.save(currentGameId, notes) }
                     },
@@ -293,6 +340,40 @@ class TrackpadActivity : ComponentActivity() {
                     onRestoreTrackpad = ::restoreTrackpad,
                     onRestoreBothScreens = ::restoreBothScreens,
                 )
+                pendingCreatedSkin?.let { imported ->
+                    AlertDialog(
+                        onDismissRequest = { pendingCreatedSkin = null },
+                        title = { Text("Skin added") },
+                        text = {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                SkinFileArtwork(
+                                    imported.root?.resolve("preview.png"),
+                                    Modifier.fillMaxWidth().height(160.dp),
+                                )
+                                Text("${imported.manifest.name} by ${imported.manifest.author}")
+                                Text(if (currentGameId.isBlank()) "Start a game to assign this skin." else "Apply to $currentGameId?")
+                            }
+                        },
+                        confirmButton = {
+                            TextButton(
+                                enabled = currentGameId.isNotBlank(),
+                                onClick = {
+                                    skinRepository.assignGameplaySkin(currentGameId, imported.manifest.id)
+                                    pendingCreatedSkin = null
+                                },
+                            ) { Text("APPLY") }
+                        },
+                        dismissButton = { TextButton(onClick = { pendingCreatedSkin = null }) { Text("KEEP INSTALLED") } },
+                    )
+                }
+                skinBuildError?.let { error ->
+                    AlertDialog(
+                        onDismissRequest = { skinBuildError = null },
+                        title = { Text("Skin could not be added") },
+                        text = { Text(error) },
+                        confirmButton = { TextButton(onClick = { skinBuildError = null }) { Text("OK") } },
+                    )
+                }
             }
         }
     }
@@ -466,6 +547,7 @@ class TrackpadActivity : ComponentActivity() {
         "handleMirrorGeometry gameId='${geometry.gameId}' generation=${geometry.generation}"
     )
         val previous = mirrorSourceGeometry
+        lowerSkinContext = lowerSkinContextForTarget(lowerSkinContext, geometry.gameId)
         val changed = previous != null &&
             (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
         mirrorSourceGeometry = geometry
@@ -740,11 +822,16 @@ class TrackpadActivity : ComponentActivity() {
         releaseForwardedGamepadKeys()
         CursorDeltaCoordinator.releaseJoystickAxes()
         setIntent(intent)
+        val requestedSkinContext = intent.skinContextOr(lowerSkinContext)
+        lowerSkinContext = mirrorSourceGeometry?.let { geometry ->
+            lowerSkinContextForTarget(requestedSkinContext, geometry.gameId)
+        } ?: requestedSkinContext
         receivedIntentFlags = intent.flags
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
             ?.let { "Received launch request: $it" }
             ?: "Received a new intent without a launch reason."
         recordLifecycle("NEW_INTENT")
+        ScummVMInputClient.queryMirrorGeometry()
         if (mirrorLifecycleActive) mirrorHost?.activate(currentDisplayId)
     }
 
@@ -1158,9 +1245,14 @@ private fun AdventurePadScreen(
     gestureResetGeneration: Int,
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
-    activeTheme: AdventurePadThemeDefinition,
+    activeColourTheme: AdventurePadThemeDefinition,
+    activeSkin: ResolvedSkin,
+    installedSkins: List<InstalledSkin>,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
-    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    onColourThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    onSkinSelected: (String?) -> Unit,
+    onAddSkin: () -> Unit,
+    onRemoveSkin: (String) -> Boolean,
     onNotesChanged: (String) -> Unit,
     onSaveWalkthroughToNotes: (String, String?) -> Unit,
     onWalkthroughImported: (WalkthroughDocument) -> Unit,
@@ -1206,6 +1298,10 @@ private fun AdventurePadScreen(
             .background(AdventurePadThemeTokens.colors.background)
             .windowInsetsPadding(WindowInsets.safeDrawing),
     ) {
+        SkinArtwork(
+            gameplayBackgroundCandidates(splitViewVisible = interfacePanelVisible),
+            Modifier.fillMaxSize(),
+        )
         Column(Modifier.fillMaxSize()) {
             if (shouldShowSplitEditorControls(cropEditorModel) && mirrorSourceGeometry != null) {
                 MirrorCropEditor(
@@ -1289,69 +1385,100 @@ private fun AdventurePadScreen(
                     }
                 }
             Box(blockingModifier) {
-                val pageModifier = Modifier
-                    .fillMaxSize(LOWER_PAGE_FRACTION)
-                    .align(Alignment.Center)
-                    .clip(AdventurePadThemeTokens.shapes.large)
-                    .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large)
+                SkinArtwork(
+                    lowerPageBackgroundCandidates(activePage, companionSection, interfacePanelVisible),
+                    Modifier.fillMaxSize(),
+                )
                 when (activePage) {
-                    LowerScreenPage.COMPANION -> CompanionScreen(
-                        gameId = currentGameId,
-                        persistedNotes = persistedNotes,
-                        walkthrough = walkthrough,
-                        selectedSection = companionSection,
-                        statistics = CompanionStatistics(
-                            targetId = currentGameId,
-                            displayMode = displayMode,
-                            splitProfileConfigured = mirrorSourceGeometry
-                                ?.let(cropProfile::isCompatibleWith) == true,
-                            notesPresent = persistedNotes.isNotBlank(),
-                        ),
-                        onNotesChanged = onNotesChanged,
-                        onSaveWalkthroughToNotes = onSaveWalkthroughToNotes,
-                        onWalkthroughImported = onWalkthroughImported,
-                        onWalkthroughRemoved = onWalkthroughRemoved,
-                        onWalkthroughPositionChanged = onWalkthroughPositionChanged,
-                        onWalkthroughPreferencesChanged = onWalkthroughPreferencesChanged,
-                        onSectionSelected = {
-                            navigate(LowerScreenNavigationAction.SelectCompanionSection(it))
-                        },
-                        onBack = { navigate(LowerScreenNavigationAction.BackCompanion) },
-                        onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
-                        modifier = pageModifier,
-                    )
-                    LowerScreenPage.SETTINGS -> PointerSpeedSettings(
-                        pointerSpeed = pointerSpeed,
-                        onPointerSpeedSelected = onPointerSpeedSelected,
-                        activeTheme = activeTheme,
-                        onThemeSelected = onThemeSelected,
-                        displayModePreferences = displayModePreferences,
-                        displayMode = displayMode,
-                        upperExpansionSupported = upperExpansionSupported,
-                        onPreferredDisplayModeChanged = onPreferredDisplayModeChanged,
-                        cropConfigurationEnabled = mirrorSourceGeometry?.isSupported == true,
-                        onConfigureCrop = {
-                            navigate(LowerScreenNavigationAction.ClosePage)
-                            onOpenCropEditor()
-                        },
-                        diagnosticsVisible = diagnosticsVisible,
-                        onDiagnosticsVisibleChanged = { diagnosticsVisible = it },
-                        diagnostics = mouseDiagnostics,
-                        displayId = displayId,
-                        connectionDiagnostics = connectionDiagnostics,
-                        mirrorCropDiagnostics = MirrorCropDiagnostics(
-                            geometry = mirrorSourceGeometry,
-                            profile = cropProfile,
-                            acknowledgement = lastCropAcknowledgement,
-                            displayMode = displayMode,
-                            displayModePreferences = displayModePreferences,
-                            upperAcknowledgement = lastUpperPresentationAcknowledgement,
-                        ),
-                        onRestoreTrackpad = onRestoreTrackpad,
-                        onRestoreBothScreens = onRestoreBothScreens,
-                        onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
-                        modifier = pageModifier,
-                    )
+                    LowerScreenPage.COMPANION -> Box(
+                        Modifier
+                            .fillMaxSize()
+                            .padding(COMPANION_SAFE_CONTENT_INSET_DP.dp)
+                            .clip(AdventurePadThemeTokens.shapes.large)
+                            .border(
+                                1.dp,
+                                AdventurePadThemeTokens.colors.outline,
+                                AdventurePadThemeTokens.shapes.large,
+                            ),
+                    ) {
+                        CompanionScreen(
+                            gameId = currentGameId,
+                            persistedNotes = persistedNotes,
+                            walkthrough = walkthrough,
+                            selectedSection = companionSection,
+                            statistics = CompanionStatistics(
+                                targetId = currentGameId,
+                                displayMode = displayMode,
+                                splitProfileConfigured = mirrorSourceGeometry
+                                    ?.let(cropProfile::isCompatibleWith) == true,
+                                notesPresent = persistedNotes.isNotBlank(),
+                            ),
+                            onNotesChanged = onNotesChanged,
+                            onSaveWalkthroughToNotes = onSaveWalkthroughToNotes,
+                            onWalkthroughImported = onWalkthroughImported,
+                            onWalkthroughRemoved = onWalkthroughRemoved,
+                            onWalkthroughPositionChanged = onWalkthroughPositionChanged,
+                            onWalkthroughPreferencesChanged = onWalkthroughPreferencesChanged,
+                            onSectionSelected = {
+                                navigate(LowerScreenNavigationAction.SelectCompanionSection(it))
+                            },
+                            onBack = { navigate(LowerScreenNavigationAction.BackCompanion) },
+                            onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
+                    LowerScreenPage.SETTINGS -> AdventurePadTheme(theme = activeColourTheme) {
+                        Box(
+                            Modifier.fillMaxSize()
+                                .background(AdventurePadThemeTokens.colors.background),
+                        ) {
+                            PointerSpeedSettings(
+                                pointerSpeed = pointerSpeed,
+                                onPointerSpeedSelected = onPointerSpeedSelected,
+                                activeColourTheme = activeColourTheme,
+                                onColourThemeSelected = onColourThemeSelected,
+                                activeSkin = activeSkin,
+                                installedSkins = installedSkins,
+                                onSkinSelected = onSkinSelected,
+                                onAddSkin = onAddSkin,
+                                onRemoveSkin = onRemoveSkin,
+                                displayModePreferences = displayModePreferences,
+                                displayMode = displayMode,
+                                upperExpansionSupported = upperExpansionSupported,
+                                onPreferredDisplayModeChanged = onPreferredDisplayModeChanged,
+                                cropConfigurationEnabled = mirrorSourceGeometry?.isSupported == true,
+                                onConfigureCrop = {
+                                    navigate(LowerScreenNavigationAction.ClosePage)
+                                    onOpenCropEditor()
+                                },
+                                diagnosticsVisible = diagnosticsVisible,
+                                onDiagnosticsVisibleChanged = { diagnosticsVisible = it },
+                                diagnostics = mouseDiagnostics,
+                                displayId = displayId,
+                                connectionDiagnostics = connectionDiagnostics,
+                                mirrorCropDiagnostics = MirrorCropDiagnostics(
+                                    geometry = mirrorSourceGeometry,
+                                    profile = cropProfile,
+                                    acknowledgement = lastCropAcknowledgement,
+                                    displayMode = displayMode,
+                                    displayModePreferences = displayModePreferences,
+                                    upperAcknowledgement = lastUpperPresentationAcknowledgement,
+                                ),
+                                onRestoreTrackpad = onRestoreTrackpad,
+                                onRestoreBothScreens = onRestoreBothScreens,
+                                onClose = { navigate(LowerScreenNavigationAction.ClosePage) },
+                                modifier = Modifier
+                                    .fillMaxSize(APPLICATION_PAGE_FRACTION)
+                                    .align(Alignment.Center)
+                                    .clip(AdventurePadThemeTokens.shapes.large)
+                                    .border(
+                                        1.dp,
+                                        AdventurePadThemeTokens.colors.outline,
+                                        AdventurePadThemeTokens.shapes.large,
+                                    ),
+                            )
+                        }
+                    }
                     LowerScreenPage.GAMEPLAY -> Unit
                 }
             }
@@ -1436,8 +1563,13 @@ private fun MirrorPrototypePanel(
 private fun PointerSpeedSettings(
     pointerSpeed: PointerSpeed,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
-    activeTheme: AdventurePadThemeDefinition,
-    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    activeColourTheme: AdventurePadThemeDefinition,
+    onColourThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    activeSkin: ResolvedSkin,
+    installedSkins: List<InstalledSkin>,
+    onSkinSelected: (String?) -> Unit,
+    onAddSkin: () -> Unit,
+    onRemoveSkin: (String) -> Boolean,
     displayModePreferences: DisplayModePreferences,
     displayMode: DisplayMode,
     upperExpansionSupported: Boolean,
@@ -1456,6 +1588,7 @@ private fun PointerSpeedSettings(
     modifier: Modifier = Modifier,
 ) {
     var themeDialogVisible by rememberSaveable { mutableStateOf(false) }
+    var skinDialogVisible by rememberSaveable { mutableStateOf(false) }
 
     AdventurePadScrollablePage(
         modifier = modifier
@@ -1536,9 +1669,20 @@ private fun PointerSpeedSettings(
             color = AdventurePadThemeTokens.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
         )
-        SettingsSectionTitle("APPEARANCE")
+        SettingsSectionTitle("THEMES")
         OutlinedButton(
             onClick = { themeDialogVisible = true },
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
+            border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Colour theme", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(activeColourTheme.displayName, color = AdventurePadThemeTokens.colors.textSecondary)
+            }
+        }
+        OutlinedButton(
+            onClick = { skinDialogVisible = true },
             colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
             border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
             modifier = Modifier.fillMaxWidth(),
@@ -1547,8 +1691,11 @@ private fun PointerSpeedSettings(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text("Theme", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Text(activeTheme.displayName, color = AdventurePadThemeTokens.colors.textSecondary)
+                Text("Game skin", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text(
+                    activeSkin.skin.takeUnless(InstalledSkin::isBuiltIn)?.manifest?.name ?: "None",
+                    color = AdventurePadThemeTokens.colors.textSecondary,
+                )
             }
         }
         SettingsSectionTitle("SPLIT VIEW")
@@ -1625,32 +1772,59 @@ private fun PointerSpeedSettings(
 
     if (themeDialogVisible) {
         ThemeSelectionDialog(
-            activeTheme = activeTheme,
+            activeTheme = activeColourTheme,
             onThemeSelected = {
-                onThemeSelected(it)
+                onColourThemeSelected(it)
                 themeDialogVisible = false
             },
             onDismiss = { themeDialogVisible = false },
         )
     }
+
+    if (skinDialogVisible) {
+        SkinSelectionDialog(
+            activeSkin = activeSkin,
+            installedSkins = gameplaySkinChoices(installedSkins),
+            onSkinSelected = {
+                onSkinSelected(it)
+                skinDialogVisible = false
+            },
+            onAddSkin = {
+                skinDialogVisible = false
+                onAddSkin()
+            },
+            onRemoveSkin = onRemoveSkin,
+            onDismiss = { skinDialogVisible = false },
+        )
+    }
 }
 
 @Composable
-private fun ThemeSelectionDialog(
-    activeTheme: AdventurePadThemeDefinition,
-    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+private fun SkinSelectionDialog(
+    activeSkin: ResolvedSkin,
+    installedSkins: List<InstalledSkin>,
+    onSkinSelected: (String?) -> Unit,
+    onAddSkin: () -> Unit,
+    onRemoveSkin: (String) -> Boolean,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Theme") },
+        title = { Text("Themes") },
         text = {
             Column {
-                AdventurePadThemes.BuiltIns.forEach { theme ->
+                OutlinedButton(
+                    onClick = { onSkinSelected(null) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RadioButton(selected = activeSkin.skin.isBuiltIn, onClick = null)
+                    Text("No game skin", modifier = Modifier.weight(1f))
+                }
+                installedSkins.forEach { skin ->
                     OutlinedButton(
-                        onClick = { onThemeSelected(theme) },
+                        onClick = { onSkinSelected(skin.manifest.id) },
                         colors = ButtonDefaults.outlinedButtonColors(
-                            containerColor = if (theme.id == activeTheme.id) {
+                            containerColor = if (skin.manifest.id == activeSkin.id) {
                                 AdventurePadThemeTokens.colors.surfacePressed
                             } else {
                                 Color.Transparent
@@ -1661,17 +1835,49 @@ private fun ThemeSelectionDialog(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         RadioButton(
-                            selected = theme.id == activeTheme.id,
+                            selected = skin.manifest.id == activeSkin.id,
                             onClick = null,
                         )
-                        Text(theme.displayName, modifier = Modifier.weight(1f))
+                        Text(skin.manifest.name, modifier = Modifier.weight(1f))
+                        if (!skin.isBuiltIn) {
+                            TextButton(onClick = { onRemoveSkin(skin.manifest.id) }) { Text("REMOVE") }
+                        }
                     }
+                }
+                OutlinedButton(onClick = onAddSkin, modifier = Modifier.fillMaxWidth()) {
+                    Text("ADD SKIN")
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("CANCEL") }
         },
+    )
+}
+
+@Composable
+private fun ThemeSelectionDialog(
+    activeTheme: AdventurePadThemeDefinition,
+    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Colour theme") },
+        text = {
+            Column {
+                AdventurePadThemes.BuiltIns.forEach { theme ->
+                    OutlinedButton(
+                        onClick = { onThemeSelected(theme) },
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        RadioButton(selected = theme.id == activeTheme.id, onClick = null)
+                        Text(theme.displayName, modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("CANCEL") } },
     )
 }
 
@@ -1848,38 +2054,56 @@ private fun GameplayUtilityBar(
             .padding(horizontal = AdventurePadDesign.spacingMd, vertical = AdventurePadDesign.spacingXs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(
+        StatefulSkinUtilityButton(
+            button = SkinnableButton.COMPANION,
             onClick = onOpenCompanion,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
-            modifier = Modifier
-                .heightIn(min = AdventurePadDesign.utilityTouchTarget)
-                .widthIn(min = 132.dp)
-                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
-                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
-        ) {
-            Text(
-                text = GameplayUtilityAction.COMPANION.displayLabel(),
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
-        }
+            label = GameplayUtilityAction.COMPANION.displayLabel(),
+        )
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         ConnectionIndicator(isConnected = isScummVMConnected)
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-        TextButton(
+        StatefulSkinUtilityButton(
+            button = SkinnableButton.SETTINGS,
             onClick = onOpenSettings,
+            label = GameplayUtilityAction.SETTINGS.displayLabel(),
+        )
+    }
+}
+
+@Composable
+private fun StatefulSkinUtilityButton(
+    button: SkinnableButton,
+    label: String,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val density = LocalDensity.current
+    var measuredSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    Box(
+        Modifier
+            .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
+            .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
+    ) {
+        if (measuredSize != androidx.compose.ui.unit.IntSize.Zero) {
+            val artworkSize = with(density) {
+                androidx.compose.ui.unit.DpSize(measuredSize.width.toDp(), measuredSize.height.toDp())
+            }
+            SkinArtwork(
+                button.artworkCandidates(pressed),
+                Modifier.size(artworkSize.width, artworkSize.height),
+            )
+        }
+        TextButton(
+            onClick = onClick,
+            interactionSource = interactionSource,
             colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
             modifier = Modifier
                 .heightIn(min = AdventurePadDesign.utilityTouchTarget)
                 .widthIn(min = 132.dp)
-                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
-                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
+                .onSizeChanged { measuredSize = it },
         ) {
-            Text(
-                text = GameplayUtilityAction.SETTINGS.displayLabel(),
-                maxLines = 1,
-                style = MaterialTheme.typography.labelLarge,
-            )
+            Text(text = label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -1915,6 +2139,17 @@ private fun TouchSurface(
     val currentButtonUp by rememberUpdatedState(onButtonUp)
     val themeColors = AdventurePadThemeTokens.colors
     val componentStyles = AdventurePadThemeTokens.components
+    var leftButtonPressed by remember { mutableStateOf(false) }
+    var rightButtonPressed by remember { mutableStateOf(false) }
+
+    fun dispatchOverlayTransition(transition: TrackpadOverlayButtonTransition?) {
+        transition ?: return
+        when (transition.button) {
+            TrackpadOverlayButton.LEFT -> leftButtonPressed = transition.isDown
+            TrackpadOverlayButton.RIGHT -> rightButtonPressed = transition.isDown
+        }
+        transition.dispatch(currentButtonDown, currentButtonUp)
+    }
 
     Box(
         modifier = modifier
@@ -1979,11 +2214,11 @@ private fun TouchSurface(
                                     .filter { it.pressed && !it.previousPressed }
                                     .forEach { pointer ->
                                         overlayGeometry?.let { geometry ->
-                                            inputOwnership.begin(
+                                            dispatchOverlayTransition(inputOwnership.begin(
                                                 pointerId = pointer.id.value,
                                                 position = pointer.position,
                                                 geometry = geometry,
-                                            )?.dispatch(currentButtonDown, currentButtonUp)
+                                            ))
                                         }
                                     }
                                 val trackpadPointerIds = inputOwnership.trackpadPointerIds()
@@ -2022,10 +2257,7 @@ private fun TouchSurface(
                                     event.changes
                                         .filter { !it.pressed && it.previousPressed }
                                         .forEach { pointer ->
-                                            inputOwnership.finish(pointer.id.value)?.dispatch(
-                                                currentButtonDown,
-                                                currentButtonUp,
-                                            )
+                                            dispatchOverlayTransition(inputOwnership.finish(pointer.id.value))
                                         }
                                     if (inputOwnership.isEmpty()) buttonChordActive = false
                                     event.changes.forEach(PointerInputChange::consume)
@@ -2061,10 +2293,7 @@ private fun TouchSurface(
                                     event.changes
                                         .filter { !it.pressed && it.previousPressed }
                                         .forEach { pointer ->
-                                            inputOwnership.finish(pointer.id.value)?.dispatch(
-                                                currentButtonDown,
-                                                currentButtonUp,
-                                            )
+                                            dispatchOverlayTransition(inputOwnership.finish(pointer.id.value))
                                         }
                                     event.changes.forEach(PointerInputChange::consume)
                                     continue
@@ -2072,7 +2301,7 @@ private fun TouchSurface(
                                 if (trackpadEventType == null) {
                                     event.changes
                                         .filter { !it.pressed && it.previousPressed }
-                                        .forEach { inputOwnership.finish(it.id.value) }
+                                        .forEach { dispatchOverlayTransition(inputOwnership.finish(it.id.value)) }
                                     event.changes.forEach(PointerInputChange::consume)
                                     continue
                                 }
@@ -2157,7 +2386,7 @@ private fun TouchSurface(
                                 touchState.value = nextState
                                 event.changes
                                     .filter { !it.pressed && it.previousPressed }
-                                    .forEach { inputOwnership.finish(it.id.value) }
+                                    .forEach { dispatchOverlayTransition(inputOwnership.finish(it.id.value)) }
                                 event.changes.forEach(PointerInputChange::consume)
                             }
                         }
@@ -2186,9 +2415,7 @@ private fun TouchSurface(
                         val timerWasPending = holdJob != null
                         holdJob?.cancel()
                         holdJob = null
-                        inputOwnership.finishAll().forEach {
-                            it.dispatch(currentButtonDown, currentButtonUp)
-                        }
+                        inputOwnership.finishAll().forEach(::dispatchOverlayTransition)
                         if (timerWasPending) {
                             onGestureDiagnostic("PENDING HOLD TIMER CANCELLED: LIFECYCLE RESET")
                         }
@@ -2206,6 +2433,27 @@ private fun TouchSurface(
                 }
             },
     ) {
+        SkinArtwork(SkinSlots.TRACKPAD_SURFACE, Modifier.fillMaxSize())
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val overlayHeight = (maxHeight * TRACKPAD_OVERLAY_HEIGHT_FRACTION)
+                .coerceIn(
+                    AdventurePadDesign.trackpadOverlayMinimumHeight,
+                    AdventurePadDesign.trackpadOverlayMaximumHeight,
+                )
+                .coerceAtMost(maxHeight)
+            SkinArtwork(
+                SkinnableButton.LMB.artworkCandidates(leftButtonPressed),
+                Modifier.align(Alignment.BottomStart)
+                    .fillMaxWidth(TRACKPAD_OVERLAY_WIDTH_FRACTION)
+                    .height(overlayHeight),
+            )
+            SkinArtwork(
+                SkinnableButton.RMB.artworkCandidates(rightButtonPressed),
+                Modifier.align(Alignment.BottomEnd)
+                    .fillMaxWidth(TRACKPAD_OVERLAY_WIDTH_FRACTION)
+                    .height(overlayHeight),
+            )
+        }
         Canvas(modifier = Modifier.fillMaxSize()) {
             val overlayGeometry = calculateTrackpadOverlayGeometry(
                 width = size.width,
@@ -3678,3 +3926,8 @@ private const val MaxMoveEventCount = 999_999
 private const val AdventurePadBridgeTag = "AdventurePadBridge"
 private const val RAW_TOUCH_TAG = "AdventurePadRawTouch"
 private const val RAW_SEQUENCE_LIMIT = 2
+
+private fun Intent.skinContextOr(fallback: SkinContext): SkinContext =
+    getStringExtra(DualDisplayCoordinator.EXTRA_SKIN_CONTEXT)
+        ?.let { value -> SkinContext.entries.firstOrNull { it.name == value } }
+        ?: fallback

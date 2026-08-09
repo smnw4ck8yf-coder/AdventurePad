@@ -1,0 +1,35 @@
+AdventurePad Milestone 7.3 — Rainbow ProofSkin build report
+
+Source PNG: RainbowProofSkin-source.png
+Source dimensions: 4720x4040 RGBA
+Source SHA-256: 476706860c26e3fd1a637ac0403b7fd9eb12544a181dc1e2c7a2af7b7ead9c46
+Authoring spec: ../skin-authoring/AUTHORING_TEMPLATE_SPEC.json
+Spec schema/template version: 1 / 1.0.0
+Unique authoritative regions: 17
+
+Package: RainbowProofSkin.apskin
+Package SHA-256: 65459bdaead694156f256b318fa259a57e06a24ad2cd49edf7376b9b9cb75c9a
+Package identity: org.adventurepad.proof.rainbow
+Package version: 1.0.0
+ZIP entries: 18 (skin.json, preview.png, and 16 other runtime PNGs)
+
+Validation results:
+- master dimensions match the JSON masterCanvas
+- region indices and slot IDs are unique
+- every crop and output size is read from the JSON
+- all 17 exported PNGs have their declared output dimensions
+- all exported PNGs are RGBA and retain alpha
+- preview is fully opaque
+- panel.frame center x=64, y=64, width=1112, height=232 has alpha 0
+- every exported PNG has a matching SHA-256 entry in skin.json
+- skin.json parses and uses documented scale values, including nineSlice
+- ZIP paths are relative, unique, and package-rooted
+- reference builder validation status: valid
+- AdventurePad manifest/runtime-contract unit validation: pass
+- Android unit suite: pass (226 tests)
+
+The source PNG is generated from the spec regions with flat proof colors only.
+It contains no guide sheet, guide labels, dimensions, annotations, or button text.
+
+Physical AYN Thor testing is still required. This report does not claim the
+milestone has passed device acceptance.

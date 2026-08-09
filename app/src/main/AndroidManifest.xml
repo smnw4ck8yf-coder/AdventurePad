@@ -5,6 +5,9 @@
     <permission
         android:name="com.jamesmoran.adventurepad.permission.LAUNCH_TRACKPAD"
         android:protectionLevel="signature" />
+    <permission
+        android:name="com.jamesmoran.adventurepad.permission.READ_SKINS"
+        android:protectionLevel="signature" />
 
     <uses-permission android:name="org.scummvm.scummvm.permission.RELATIVE_INPUT" />
 
@@ -21,6 +24,12 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.AdventurePad">
+        <provider
+            android:name=".ActiveSkinProvider"
+            android:authorities="com.jamesmoran.adventurepad.skins"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            android:readPermission="com.jamesmoran.adventurepad.permission.READ_SKINS" />
         <activity
             android:name=".LauncherRoutingActivity"
             android:excludeFromRecents="true"

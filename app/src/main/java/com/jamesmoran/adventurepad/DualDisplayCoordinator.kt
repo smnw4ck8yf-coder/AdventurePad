@@ -43,6 +43,7 @@ internal fun selectEligibleSecondaryDisplayId(candidates: List<DisplayCandidate>
 
 internal object DualDisplayCoordinator {
     const val EXTRA_LAUNCH_REASON = "com.jamesmoran.adventurepad.LAUNCH_REASON"
+    const val EXTRA_SKIN_CONTEXT = "com.jamesmoran.adventurepad.SKIN_CONTEXT"
 
     private const val TAG = "AdventurePadTasks"
     // NEW_TASK routes each singleTask activity to its declared affinity without duplicating tasks.
@@ -56,6 +57,7 @@ internal object DualDisplayCoordinator {
                 message = "ERROR: No eligible physical presentation display was found.",
             )
         val trackpadIntent = activityIntent<TrackpadActivity>(activity, reason)
+            .putExtra(EXTRA_SKIN_CONTEXT, SkinContext.LAUNCHER.name)
         val permissionError = checkLaunchAllowed(
             activity = activity,
             displayId = secondaryDisplay.displayId,
@@ -82,6 +84,7 @@ internal object DualDisplayCoordinator {
             )
         val mainIntent = activityIntent<MainActivity>(activity, "Restore requested")
         val trackpadIntent = activityIntent<TrackpadActivity>(activity, "Restore requested")
+            .putExtra(EXTRA_SKIN_CONTEXT, SkinContext.LAUNCHER.name)
 
         checkLaunchAllowed(
             activity = activity,

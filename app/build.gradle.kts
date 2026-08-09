@@ -33,6 +33,19 @@ android {
     buildFeatures {
         compose = true
     }
+
+    sourceSets.getByName("main").assets.directories.add(
+        layout.buildDirectory.dir("generated/authoring-spec-assets").get().asFile.absolutePath,
+    )
+}
+
+val syncAuthoringTemplateSpec by tasks.registering(Copy::class) {
+    from(rootProject.file("skin-authoring/AUTHORING_TEMPLATE_SPEC.json"))
+    into(layout.buildDirectory.dir("generated/authoring-spec-assets/skin-authoring"))
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(syncAuthoringTemplateSpec)
 }
 
 dependencies {
