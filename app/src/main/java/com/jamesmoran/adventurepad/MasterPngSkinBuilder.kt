@@ -40,7 +40,7 @@ internal class MasterPngSkinBuilder(
     fun buildAndInstall(uri: Uri): MasterPngBuildResult {
         val staging = File(cacheRoot, "skin-authoring-${UUID.randomUUID()}")
         try {
-            check(staging.mkdir()) { "Could not create skin builder staging" }
+            if (!staging.mkdir()) throw MasterPngBuildException("AdventurePad could not prepare the skin builder")
             requirePng(uri)
             val specJson = runCatching {
                 assets.open(SPEC_ASSET_PATH).bufferedReader(Charsets.UTF_8).use { it.readText() }
@@ -54,7 +54,7 @@ internal class MasterPngSkinBuilder(
                 ?: throw MasterPngBuildException("The selected PNG could not be opened")
             val metadata = metadata(displayName(uri), sourceHash)
             val packageRoot = File(staging, "package-root").apply {
-                check(mkdir()) { "Could not create package staging" }
+                if (!mkdir()) throw MasterPngBuildException("AdventurePad could not prepare the generated skin")
             }
             exportRegions(uri, authoringSpec, packageRoot)
             val hashes = authoringSpec.regions.associate { region ->
@@ -63,12 +63,21 @@ internal class MasterPngSkinBuilder(
             writeManifest(File(packageRoot, "skin.json"), authoringSpec, metadata, hashes)
             val packageFile = File(staging, "generated.apskin")
             zipPackage(packageRoot, packageFile)
-            val installed = importer.installZip(packageFile, staging, replaceExisting = true).installedSkin
+            val installed = importer.import(
+                contentResolver = contentResolver,
+                uri = Uri.fromFile(packageFile),
+                replaceExisting = false,
+            ).installedSkin
             return MasterPngBuildResult(installed)
         } catch (exception: MasterPngBuildException) {
             throw exception
         } catch (exception: SkinImportException) {
-            throw MasterPngBuildException("AdventurePad could not validate the generated skin", exception)
+            val message = if (exception.failure == SkinImportFailure.DUPLICATE_ID) {
+                "This skin is already installed. AdventurePad did not overwrite it."
+            } else {
+                "AdventurePad could not validate the generated skin."
+            }
+            throw MasterPngBuildException(message, exception)
         } catch (exception: Exception) {
             throw MasterPngBuildException(exception.message ?: "Could not build a skin from this PNG", exception)
         } finally {
@@ -82,11 +91,11 @@ internal class MasterPngSkinBuilder(
         val decoder = runCatching { BitmapRegionDecoder.newInstance(input, false) }
             .getOrElse {
                 input.close()
-                throw MasterPngBuildException("The selected PNG could not be decoded", it)
+                throw MasterPngBuildException("This PNG is unreadable or corrupt.", it)
             }
             ?: run {
                 input.close()
-                throw MasterPngBuildException("The selected PNG could not be decoded")
+                throw MasterPngBuildException("This PNG is unreadable or corrupt.")
             }
         try {
             if (decoder.width != spec.masterCanvas.width || decoder.height != spec.masterCanvas.height) {
@@ -99,7 +108,7 @@ internal class MasterPngSkinBuilder(
                 val decoded = decoder.decodeRegion(
                     Rect(region.x, region.y, region.x + region.width, region.y + region.height),
                     BitmapFactory.Options().apply { inPreferredConfig = Bitmap.Config.ARGB_8888 },
-                ) ?: throw MasterPngBuildException("The PNG contains an unreadable artwork region")
+                ) ?: throw MasterPngBuildException("This PNG is corrupt or contains an unreadable artwork region.")
                 var output = if (decoded.width == region.outputWidth && decoded.height == region.outputHeight) {
                     decoded
                 } else {
@@ -117,7 +126,9 @@ internal class MasterPngSkinBuilder(
                 }
                 if (region.alphaMode == "opaque" && !isOpaque(output)) {
                     output.recycle()
-                    throw MasterPngBuildException("The catalog image area in the template must be fully opaque")
+                    throw MasterPngBuildException(
+                        "This is not a valid AdventurePad template: the catalog image area must be fully opaque.",
+                    )
                 }
                 val destination = File(packageRoot, assetPath(region.slotId))
                 destination.parentFile?.let { parent ->
@@ -160,7 +171,9 @@ internal class MasterPngSkinBuilder(
     private fun requirePng(uri: Uri) {
         val header = contentResolver.openInputStream(uri)?.use { input -> ByteArray(8).also { input.read(it) } }
             ?: throw MasterPngBuildException("The selected file could not be opened")
-        if (!header.contentEquals(PNG_SIGNATURE)) throw MasterPngBuildException("Select a PNG exported from the AdventurePad authoring template")
+        if (!header.contentEquals(PNG_SIGNATURE)) {
+            throw MasterPngBuildException("Unsupported file. Select a PNG exported from the AdventurePad template.")
+        }
     }
 
     private fun writeManifest(

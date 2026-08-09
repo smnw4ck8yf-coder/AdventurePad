@@ -1,17 +1,22 @@
 package com.jamesmoran.adventurepad
 
 import android.content.Context
+import android.net.Uri
+import android.util.Log
 import androidx.compose.ui.graphics.Color
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeDefinition
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemes
 import java.io.File
-import android.net.Uri
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 internal class SkinRepository private constructor(private val context: Context) {
     private val preferences = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
     private val skinsRoot = File(context.filesDir, "skins")
+    private val skinImporter = SkinImporter(
+        skinsRoot,
+        versionCode = context.packageManager.getPackageInfo(context.packageName, 0).longVersionCode.toInt(),
+    )
     private val _catalog = MutableStateFlow(loadCatalog())
     val catalog: StateFlow<List<InstalledSkin>> = _catalog
     private val _selectionRevision = MutableStateFlow(0L)
@@ -66,28 +71,40 @@ internal class SkinRepository private constructor(private val context: Context) 
         _catalog.value = loadCatalog()
     }
 
+    fun importSkin(uri: Uri): SkinImportResult {
+        val result = skinImporter.import(context.contentResolver, uri)
+        refresh()
+        return result
+    }
+
     fun remove(skinId: String): Boolean {
         if (skinId.startsWith("builtin.")) return false
         val root = File(skinsRoot, skinId)
         if (!root.isDirectory || !root.canonicalPath.startsWith(skinsRoot.canonicalPath + File.separator)) return false
         if (!root.deleteRecursively()) return false
+        val editor = preferences.edit()
         preferences.all.keys.filter { key ->
             key.startsWith(KEY_GAMEPLAY_PREFIX) && preferences.getString(key, null) == skinId
-        }.forEach { preferences.edit().remove(it).apply() }
+        }.forEach(editor::remove)
+        editor.apply()
         refresh()
         _selectionRevision.value++
         context.contentResolver.notifyChange(ActiveSkinProvider.CHANGES_URI, null)
         return true
     }
 
-    fun importer() = SkinImporter(skinsRoot, versionCode = 1)
+    fun importer() = skinImporter
 
-    fun buildFromMasterPng(uri: Uri): MasterPngBuildResult = MasterPngSkinBuilder(
-        assets = context.assets,
-        contentResolver = context.contentResolver,
-        importer = importer(),
-        cacheRoot = context.cacheDir,
-    ).buildAndInstall(uri)
+    fun buildFromMasterPng(uri: Uri): MasterPngBuildResult {
+        val result = MasterPngSkinBuilder(
+            assets = context.assets,
+            contentResolver = context.contentResolver,
+            importer = importer(),
+            cacheRoot = context.cacheDir,
+        ).buildAndInstall(uri)
+        refresh()
+        return result
+    }
 
     private fun gameplayAssignments(): Map<String, String> = preferences.all
         .filterKeys { it.startsWith(KEY_GAMEPLAY_PREFIX) }
@@ -100,13 +117,14 @@ internal class SkinRepository private constructor(private val context: Context) 
         val external = skinsRoot.listFiles().orEmpty()
             .filter { it.isDirectory && !it.name.startsWith('.') }
             .mapNotNull { idRoot ->
-                idRoot.listFiles().orEmpty().filter(File::isDirectory).maxByOrNull(File::getName)
-            }
-            .mapNotNull { versionRoot ->
-                runCatching {
-                    val manifest = SkinManifestParser.parse(File(versionRoot, "skin.json").readText())
-                    InstalledSkin(manifest, versionRoot)
-                }.getOrNull()
+                idRoot.listFiles().orEmpty()
+                    .filter { it.isDirectory && !it.name.startsWith('.') }
+                    .sortedByDescending(File::getName)
+                    .firstNotNullOfOrNull { versionRoot ->
+                        runCatching { skinImporter.validateInstalled(versionRoot) }
+                            .onFailure { Log.w(TAG, "Ignoring invalid installed skin at $versionRoot", it) }
+                            .getOrNull()
+                    }
             }
         return builtInSkins() + external.sortedBy { it.manifest.name.lowercase() }
     }
@@ -155,6 +173,7 @@ internal class SkinRepository private constructor(private val context: Context) 
         private const val PREFERENCES_NAME = "adventurepad_skins_v1"
         private const val KEY_LAUNCHER_SKIN = "launcher_skin_id"
         private const val KEY_GAMEPLAY_PREFIX = "gameplay_skin."
+        private const val TAG = "AdventurePadSkins"
 
         @Volatile private var instance: SkinRepository? = null
 

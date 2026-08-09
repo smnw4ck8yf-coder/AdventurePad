@@ -1,6 +1,15 @@
 package com.jamesmoran.adventurepad
 
-internal class SkinManifestException(message: String) : IllegalArgumentException(message)
+internal enum class SkinManifestFailure {
+    INVALID,
+    UNSUPPORTED_VERSION,
+    RESERVED_ID,
+}
+
+internal class SkinManifestException(
+    message: String,
+    val failure: SkinManifestFailure = SkinManifestFailure.INVALID,
+) : IllegalArgumentException(message)
 
 internal object SkinManifestParser {
     private val IdPattern = Regex("[a-z0-9]+(?:[._-][a-z0-9]+)+")
@@ -11,10 +20,20 @@ internal object SkinManifestParser {
     fun parse(json: String): SkinManifest {
         val root = SimpleJson.parse(json).asObject("skin.json")
         val formatVersion = root.requiredInt("formatVersion")
-        checkManifest(formatVersion == SKIN_FORMAT_VERSION, "Unsupported formatVersion $formatVersion")
+        if (formatVersion != SKIN_FORMAT_VERSION) {
+            throw SkinManifestException(
+                "Unsupported formatVersion $formatVersion",
+                SkinManifestFailure.UNSUPPORTED_VERSION,
+            )
+        }
         val id = root.requiredString("id")
         checkManifest(IdPattern.matches(id) && id.length <= 128, "Invalid skin id")
-        checkManifest(!id.startsWith("builtin."), "External skins cannot use the builtin namespace")
+        if (id.startsWith("builtin.")) {
+            throw SkinManifestException(
+                "External skins cannot use the builtin namespace",
+                SkinManifestFailure.RESERVED_ID,
+            )
+        }
         val packageVersion = root.requiredString("packageVersion")
         checkManifest(VersionPattern.matches(packageVersion), "Invalid packageVersion")
         val assets = root.optionalObject("assets").orEmpty().mapValues { (slot, raw) ->
@@ -51,6 +70,10 @@ internal object SkinManifestParser {
 
     private fun parseAsset(slot: String, value: Map<String, Any?>): SkinAsset {
         checkManifest(slot.length <= 96 && slot.matches(Regex("[a-z0-9]+(?:[._-][a-z0-9]+)*")), "Invalid asset slot '$slot'")
+        checkManifest(
+            value.keys.all { it in AssetFields },
+            "Unsupported field in asset '$slot'",
+        )
         val path = value.requiredString("path")
         validateRelativePath(path)
         val scale = value.optionalString("scale")?.let {
@@ -105,6 +128,8 @@ internal object SkinManifestParser {
     private fun checkManifest(condition: Boolean, message: String) {
         if (!condition) throw SkinManifestException(message)
     }
+
+    private val AssetFields = setOf("path", "scale", "sha256", "canvas", "sliceInsets", "hotspot")
 }
 
 private fun Any?.asObject(label: String): Map<String, Any?> =

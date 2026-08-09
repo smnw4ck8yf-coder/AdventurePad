@@ -239,10 +239,11 @@ class TrackpadActivity : ComponentActivity() {
                             skinRepository.buildFromMasterPng(uri).installedSkin
                         }
                     }.onSuccess {
-                        skinRepository.refresh()
                         pendingCreatedSkin = it
-                    }.onFailure {
-                        skinBuildError = it.message ?: "Skin creation failed"
+                    }.onFailure { error ->
+                        Log.e("AdventurePadSkins", "PNG skin creation failed", error)
+                        skinBuildError = (error as? MasterPngBuildException)?.message
+                            ?: "AdventurePad could not create a skin from this PNG."
                     }
                 }
             }
@@ -1808,17 +1809,32 @@ private fun SkinSelectionDialog(
     onRemoveSkin: (String) -> Boolean,
     onDismiss: () -> Unit,
 ) {
+    var pendingRemoval by remember { mutableStateOf<InstalledSkin?>(null) }
+    var removalFailed by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Themes") },
+        title = { Text("Game skins") },
         text = {
             Column {
+                Text(
+                    "DEFAULT",
+                    color = AdventurePadThemeTokens.colors.textSecondary,
+                    style = MaterialTheme.typography.labelSmall,
+                )
                 OutlinedButton(
                     onClick = { onSkinSelected(null) },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
                     RadioButton(selected = activeSkin.skin.isBuiltIn, onClick = null)
                     Text("No game skin", modifier = Modifier.weight(1f))
+                }
+                if (installedSkins.isNotEmpty()) {
+                    Text(
+                        "INSTALLED CUSTOM SKINS",
+                        color = AdventurePadThemeTokens.colors.textSecondary,
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
                 }
                 installedSkins.forEach { skin ->
                     OutlinedButton(
@@ -1840,7 +1856,7 @@ private fun SkinSelectionDialog(
                         )
                         Text(skin.manifest.name, modifier = Modifier.weight(1f))
                         if (!skin.isBuiltIn) {
-                            TextButton(onClick = { onRemoveSkin(skin.manifest.id) }) { Text("REMOVE") }
+                            TextButton(onClick = { pendingRemoval = skin }) { Text("REMOVE") }
                         }
                     }
                 }
@@ -1853,6 +1869,32 @@ private fun SkinSelectionDialog(
             TextButton(onClick = onDismiss) { Text("CANCEL") }
         },
     )
+    pendingRemoval?.let { skin ->
+        AlertDialog(
+            onDismissRequest = { pendingRemoval = null },
+            title = { Text("Remove game skin?") },
+            text = { Text("Remove ${skin.manifest.name} from AdventurePad?") },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (!onRemoveSkin(skin.manifest.id)) removalFailed = true
+                    pendingRemoval = null
+                }) { Text("REMOVE") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRemoval = null }) { Text("CANCEL") }
+            },
+        )
+    }
+    if (removalFailed) {
+        AlertDialog(
+            onDismissRequest = { removalFailed = false },
+            title = { Text("Skin could not be removed") },
+            text = { Text("AdventurePad could not remove this installed skin.") },
+            confirmButton = {
+                TextButton(onClick = { removalFailed = false }) { Text("OK") }
+            },
+        )
+    }
 }
 
 @Composable

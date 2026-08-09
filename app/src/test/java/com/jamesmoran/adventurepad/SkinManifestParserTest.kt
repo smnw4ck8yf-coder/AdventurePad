@@ -55,6 +55,18 @@ class SkinManifestParserTest {
         assertEquals(SkinScaleMode.NINE_SLICE, SkinManifestParser.parse(valid).assets.getValue(SkinSlots.PANEL_FRAME).scale)
     }
 
+    @Test
+    fun rejectsUnsupportedAssetDeclarationFields() {
+        val invalid = validManifest().replace(
+            "\"path\": \"assets/bottom.png\"",
+            "\"path\": \"assets/bottom.png\", \"script\": \"payload.js\"",
+        )
+
+        assertThrows(SkinManifestException::class.java) {
+            SkinManifestParser.parse(invalid)
+        }
+    }
+
     private fun validManifest() = """
         {
           "formatVersion": 1,
