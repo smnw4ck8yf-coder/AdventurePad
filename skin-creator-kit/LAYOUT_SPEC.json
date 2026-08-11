@@ -42,14 +42,16 @@
           "rect": "TouchSurface bottom-left; width=0.34*surfaceWidth; height=clamp(0.22*surfaceHeight,56dp,88dp)",
           "referenceRectPx": [24, 770, 429, 946],
           "touchEqualsArtworkBounds": true,
-          "nativeLabel": "Left; bottom-start with 16dp start and 12dp bottom padding"
+          "nativeLabel": "Standard only: Left; bottom-start with 16dp start and 12dp bottom padding",
+          "immersiveVisuals": "skin artwork only; native label, overlay, separator, and position marker hidden"
         },
         "rmb": {
           "slots": {"normal": "button.rmb.normal", "pressed": "button.rmb.pressed"},
           "rect": "TouchSurface bottom-right; width=0.34*surfaceWidth; height=clamp(0.22*surfaceHeight,56dp,88dp)",
           "referenceRectPx": [811, 770, 1216, 946],
           "touchEqualsArtworkBounds": true,
-          "nativeLabel": "Right; bottom-end with 16dp end and 12dp bottom padding"
+          "nativeLabel": "Standard only: Right; bottom-end with 16dp end and 12dp bottom padding",
+          "immersiveVisuals": "skin artwork only; native label, overlay, separator, and position marker hidden"
         },
         "utilityBar": {
           "rect": "bottom row; 12dp horizontal and 4dp vertical padding; intrinsic minimum height 64dp",
@@ -59,18 +61,15 @@
           "slots": {"normal": "button.companion.normal", "pressed": "button.companion.pressed"},
           "minimumTouchDp": [132, 56],
           "referenceMinimumRectPx": [24, 952, 288, 1064],
-          "nativeLabel": "COMPANION"
+          "nativeLabel": "Standard only: COMPANION",
+          "immersiveVisuals": "state-aware skin artwork; native text and chrome hidden"
         },
         "settings": {
           "slots": {"normal": "button.settings.normal", "pressed": "button.settings.pressed"},
           "minimumTouchDp": [132, 56],
           "referenceMinimumRectPx": [976, 952, 1240, 1064],
-          "nativeLabel": "SETTINGS"
-        },
-        "connection": {
-          "slot": null,
-          "rect": "centered intrinsic text between weighted spacers",
-          "nativeLabel": "● Online or ● Offline"
+          "nativeLabel": "Standard only: SETTINGS",
+          "immersiveVisuals": "state-aware skin artwork; native text and chrome hidden"
         }
       }
     },
@@ -88,26 +87,44 @@
     },
     "companion": {
       "canvasPx": [1240, 1080],
-      "pageBounds": "94% of safeDrawing width and height, centered",
-      "referencePageRectPx": [37, 32, 1203, 1047],
+      "pageBounds": "Standard: 94% of safeDrawing width and height, centered. Immersive with exact art: full safeDrawing surface",
+      "referencePageRectPx": [0, 0, 1240, 1080],
       "slot": "companion.background",
-      "header": "fill width; 16dp horizontal/8dp vertical padding; close 48dp wide and min 56dp high; optional back 48dp wide/min 48dp",
-      "content": "fill remaining size; home scrolls with 16dp padding and 8dp card gaps",
-      "dynamic": ["section selection", "card text", "availability badges", "scroll extent"]
+      "header": {"heightDp": 72, "referenceRectPx": [0, 0, 1240, 144], "immersiveAppearance": "artwork supplies Companion title; native title/chrome hidden"},
+      "primaryActions": {
+        "topOffsetDp": 48,
+        "rowHeightDp": 96,
+        "horizontalPaddingDp": 16,
+        "gapDp": 16,
+        "referenceSafeWidthDp": 620,
+        "actionWidthDpAtReference": 286,
+        "notesHitRegionDpAtReference": [16, 120, 302, 216],
+        "walkthroughHitRegionDpAtReference": [318, 120, 604, 216],
+        "notesReferenceRectPx": [32, 240, 604, 432],
+        "walkthroughReferenceRectPx": [636, 240, 1208, 432],
+        "notesSlots": {"normal": "button.notes.normal", "pressed": "button.notes.pressed"},
+        "walkthroughSlots": {"normal": "button.walkthrough.normal", "pressed": "button.walkthrough.pressed"},
+        "sourceCanvasPx": [572, 192],
+        "nineSlicePx": [32, 32, 32, 32],
+        "geometryOwner": "AdventurePad; artists decorate these fixed regions and never define coordinates",
+        "immersiveAppearance": "dedicated state-aware artwork supplies labels and buttons; no native text, panels, or outlines",
+        "legacyFallback": "when dedicated assets are absent, companion.background and the current native/transparent hit-target behavior remain unchanged"
+      },
+      "futureExpansion": "open area below primary action row reserved for future fixed action regions"
     },
     "notes": {
       "canvasPx": [1240, 1080],
-      "pageBounds": "same 94% centered Companion page",
+      "pageBounds": "Standard: 94% centered page. Immersive with exact art: full surface",
       "slot": "notes.background",
       "fallback": "native rendering",
-      "header": "PageHeader with back and close",
+      "header": "fixed 72dp solid/light header with back and close in Immersive",
       "content": "16dp padding; 8dp gap; auto-save message plus OutlinedTextField weight(1), minLines=8",
       "keyboard": "activity adjustResize and IME Done; visible editor height is runtime-derived",
       "contrastCritical": ["editor text", "placeholder", "cursor", "outline", "auto-save message"]
     },
     "walkthrough": {
       "canvasPx": [1240, 1080],
-      "pageBounds": "same 94% centered Companion page",
+      "pageBounds": "Standard: 94% centered page. Immersive with exact art: full surface",
       "slot": "walkthrough.background",
       "fallback": "native rendering",
       "toolbar": "8dp horizontal/4dp vertical padding; back/close 48x48dp min; reader/search/contents/more are conditional intrinsic-width controls with 40dp min height",
@@ -121,9 +138,11 @@
     "rmb": {"sourceCanvasPx": [528, 224], "nineSlicePx": [48, 48, 48, 48], "normal": "button.rmb.normal", "pressed": "button.rmb.pressed"},
     "companion": {"sourceCanvasPx": [264, 112], "nineSlicePx": [24, 24, 24, 24], "normal": "button.companion.normal", "pressed": "button.companion.pressed"},
     "settings": {"sourceCanvasPx": [264, 112], "nineSlicePx": [24, 24, 24, 24], "normal": "button.settings.normal", "pressed": "button.settings.pressed"},
+    "notes": {"sourceCanvasPx": [572, 192], "nineSlicePx": [32, 32, 32, 32], "normal": "button.notes.normal", "pressed": "button.notes.pressed"},
+    "walkthrough": {"sourceCanvasPx": [572, 192], "nineSlicePx": [32, 32, 32, 32], "normal": "button.walkthrough.normal", "pressed": "button.walkthrough.pressed"},
     "pressedFallback": "matching normal asset, then legacy L/R asset where applicable, then native rendering",
     "futureStates": {"hover": "not required", "focused": "not required; native Compose remains", "disabled": "not required; native Compose remains"},
-    "textRule": "all artwork is label-free; Compose owns visible labels, semantics, localization and accessibility"
+    "textRule": "Standard supplies visible native labels. Immersive artwork supplies guide-required visual labels; Compose still owns semantics, localization metadata, accessibility, and interaction."
   },
   "nineSliceRecommendations": {
     "trackpad.surface": [96, 96, 96, 96],
@@ -135,15 +154,19 @@
     "button.companion.pressed": [24, 24, 24, 24],
     "button.settings.normal": [24, 24, 24, 24],
     "button.settings.pressed": [24, 24, 24, 24],
+    "button.notes.normal": [32, 32, 32, 32],
+    "button.notes.pressed": [32, 32, 32, 32],
+    "button.walkthrough.normal": [32, 32, 32, 32],
+    "button.walkthrough.pressed": [32, 32, 32, 32],
     "panel.frame": [64, 64, 64, 64]
   },
   "runtimeScaling": {
     "top.surround": "FillBounds in Android View, with runtime viewport clipped out",
     "bottom.trackpad.background": "Compose cover/crop beneath normal gameplay",
     "bottom.split.background": "Compose cover/crop beneath dynamic live mirror",
-    "companion.background": "Compose cover/crop beneath 94% native page",
-    "notes.background": "Compose cover/crop beneath 94% native Notes page",
-    "walkthrough.background": "Compose cover/crop beneath 94% native Walkthrough page",
+    "companion.background": "Compose cover/crop; full immersive Companion page or beneath 94% Standard page",
+    "notes.background": "Compose cover/crop; full immersive Notes page or beneath 94% Standard page",
+    "walkthrough.background": "Compose cover/crop; full immersive Walkthrough page or beneath 94% Standard page",
     "trackpad.surface": "Compose nine-slice FillBounds",
     "statefulButtons": "Compose nine-slice FillBounds; artwork state follows existing press state and does not own input",
     "panel.frame": "nine-slice border patches only; center patch intentionally omitted"

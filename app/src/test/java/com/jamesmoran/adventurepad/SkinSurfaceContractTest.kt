@@ -50,7 +50,13 @@ class SkinSurfaceContractTest {
     }
 
     @Test
-    fun onlyExactNotesAndWalkthroughArtworkCanBecomeImmersive() {
+    fun exactCompanionNotesAndWalkthroughArtworkCanBecomeImmersive() {
+        assertEquals(
+            FunctionalPaneTreatment.IMMERSIVE,
+            functionalPaneTreatment(
+                InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.HOME, true,
+            ),
+        )
         assertEquals(
             FunctionalPaneTreatment.IMMERSIVE,
             functionalPaneTreatment(
@@ -66,9 +72,17 @@ class SkinSurfaceContractTest {
         listOf(
             functionalPaneTreatment(InterfaceStyle.STANDARD, LowerScreenPage.COMPANION, CompanionSection.NOTES, true),
             functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.NOTES, false),
-            functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.COMPANION, CompanionSection.HOME, true),
             functionalPaneTreatment(InterfaceStyle.IMMERSIVE, LowerScreenPage.SETTINGS, CompanionSection.NOTES, true),
         ).forEach { assertEquals(FunctionalPaneTreatment.OPAQUE, it) }
+    }
+
+    @Test
+    fun immersiveSurfacePolicyKeepsSettingsNative() {
+        assertTrue(isImmersiveGameSurface(LowerScreenPage.GAMEPLAY, CompanionSection.HOME))
+        assertTrue(isImmersiveGameSurface(LowerScreenPage.COMPANION, CompanionSection.HOME))
+        assertTrue(isImmersiveGameSurface(LowerScreenPage.COMPANION, CompanionSection.NOTES))
+        assertTrue(isImmersiveGameSurface(LowerScreenPage.COMPANION, CompanionSection.WALKTHROUGH))
+        assertFalse(isImmersiveGameSurface(LowerScreenPage.SETTINGS, CompanionSection.HOME))
     }
 
     @Test
@@ -80,7 +94,7 @@ class SkinSurfaceContractTest {
     }
 
     @Test
-    fun missingRequestedSurfaceDoesNotSilentlyUseAnotherCompanionSurface() {
+    fun preActionAssetSkinKeepsItsBackgroundWithoutInventingNewButtonArtwork() {
         val root = kotlin.io.path.createTempDirectory("skin-surface-contract").toFile()
         root.resolve("companion.png").writeBytes(byteArrayOf(1))
         val companionAsset = SkinAsset(
@@ -107,7 +121,15 @@ class SkinSurfaceContractTest {
         )
         val resolved = ResolvedSkin(installed, AdventurePadThemes.Default)
 
+        assertEquals(
+            SkinSlots.COMPANION_BACKGROUND,
+            resolved.resolveAssetSlot(*companionBackgroundCandidates(CompanionSection.HOME)),
+        )
         assertNull(resolved.resolveAssetSlot(*companionBackgroundCandidates(CompanionSection.NOTES)))
+        assertNull(resolved.resolveAssetSlot(*SkinnableButton.NOTES.artworkCandidates(pressed = false)))
+        assertNull(resolved.resolveAssetSlot(*SkinnableButton.NOTES.artworkCandidates(pressed = true)))
+        assertNull(resolved.resolveAssetSlot(*SkinnableButton.WALKTHROUGH.artworkCandidates(pressed = false)))
+        assertNull(resolved.resolveAssetSlot(*SkinnableButton.WALKTHROUGH.artworkCandidates(pressed = true)))
         root.deleteRecursively()
     }
 
@@ -125,6 +147,14 @@ class SkinSurfaceContractTest {
             arrayOf(SkinSlots.BUTTON_COMPANION_PRESSED, SkinSlots.BUTTON_COMPANION_NORMAL),
             SkinnableButton.COMPANION.artworkCandidates(pressed = true),
         )
+        assertArrayEquals(
+            arrayOf(SkinSlots.BUTTON_NOTES_PRESSED, SkinSlots.BUTTON_NOTES_NORMAL),
+            SkinnableButton.NOTES.artworkCandidates(pressed = true),
+        )
+        assertArrayEquals(
+            arrayOf(SkinSlots.BUTTON_WALKTHROUGH_PRESSED, SkinSlots.BUTTON_WALKTHROUGH_NORMAL),
+            SkinnableButton.WALKTHROUGH.artworkCandidates(pressed = true),
+        )
     }
 
     @Test
@@ -132,6 +162,10 @@ class SkinSurfaceContractTest {
         assertTrue(SkinSlots.BOTTOM_SPLIT_BACKGROUND in SkinSlots.supportedV1)
         assertTrue(SkinSlots.NOTES_BACKGROUND in SkinSlots.supportedV1)
         assertTrue(SkinSlots.BUTTON_SETTINGS_PRESSED in SkinSlots.supportedV1)
+        assertTrue(SkinSlots.BUTTON_NOTES_NORMAL in SkinSlots.supportedV1)
+        assertTrue(SkinSlots.BUTTON_NOTES_PRESSED in SkinSlots.supportedV1)
+        assertTrue(SkinSlots.BUTTON_WALKTHROUGH_NORMAL in SkinSlots.supportedV1)
+        assertTrue(SkinSlots.BUTTON_WALKTHROUGH_PRESSED in SkinSlots.supportedV1)
         assertFalse(SkinSlots.LEGACY_BOTTOM_BACKGROUND in SkinSlots.supportedV1)
         assertFalse(SkinSlots.LEGACY_TRACKPAD_BUTTON_LEFT in SkinSlots.supportedV1)
     }

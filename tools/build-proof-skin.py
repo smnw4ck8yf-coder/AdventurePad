@@ -44,6 +44,10 @@ PROOF_COLORS = {
     "button.rmb.pressed": (70, 70, 70, 255),
     "button.companion.pressed": (112, 91, 60, 255),
     "button.settings.pressed": (70, 91, 104, 255),
+    "button.notes.normal": (231, 188, 103, 255),
+    "button.notes.pressed": (142, 92, 45, 255),
+    "button.walkthrough.normal": (214, 164, 72, 255),
+    "button.walkthrough.pressed": (112, 67, 34, 255),
 }
 ID_PATTERN = re.compile(r"[a-z0-9]+(?:[._-][a-z0-9]+)+$")
 VERSION_PATTERN = re.compile(r"[0-9]+(?:\.[0-9]+){0,2}(?:[-+][A-Za-z0-9.-]+)?$")

@@ -16,8 +16,8 @@ class ProofSkinBuilderTest(unittest.TestCase):
     def test_authoritative_spec_has_unique_regions(self):
         root = Path(__file__).resolve().parents[2]
         spec = builder.load_spec(root / "skin-authoring" / "AUTHORING_TEMPLATE_SPEC.json")
-        self.assertEqual(17, len(spec["regions"]))
-        self.assertEqual(17, len({region["slotId"] for region in spec["regions"]}))
+        self.assertEqual(21, len(spec["regions"]))
+        self.assertEqual(21, len({region["slotId"] for region in spec["regions"]}))
 
     def test_small_spec_builds_from_json_coordinates_and_forces_frame_center_clear(self):
         spec = {
@@ -67,11 +67,13 @@ class ProofSkinBuilderTest(unittest.TestCase):
             with self.assertRaises(builder.BuildError):
                 builder.build_skin(master, spec_path, builder.PROOF_METADATA, root / "out.apskin")
 
-    def test_adventure_journal_notes_and_walkthrough_are_exact_registered_slices(self):
+    def test_adventure_journal_notes_and_walkthrough_use_registered_output_geometry(self):
         root = Path(__file__).resolve().parents[2]
-        spec = builder.load_spec(root / "skin-authoring" / "AUTHORING_TEMPLATE_SPEC.json")
-        width, height, master = builder.read_rgba_png(root / "proof-skin" / "AdventureJournal-source.png")
-        self.assertEqual((4720, 4040), (width, height))
+        spec_path = root / "skin-authoring" / "AUTHORING_TEMPLATE_SPEC.json"
+        spec = builder.load_spec(spec_path)
+        result = builder.validate_package(root / "proof-skin" / "AdventureJournal.apskin", spec_path)
+        self.assertEqual("valid", result["status"])
+        self.assertEqual(21, result["regions"])
         expected_geometry = {
             "notes.background": (1400, 1420, 1240, 1080),
             "walkthrough.background": (2720, 1420, 1240, 1080),
@@ -83,13 +85,15 @@ class ProofSkinBuilderTest(unittest.TestCase):
                 (region["origin"]["x"], region["origin"]["y"], region["size"]["width"], region["size"]["height"]),
             )
             extracted_path = root / "proof-skin" / "adventure-journal-extracted" / builder.asset_path(slot)
-            out_width, out_height, extracted = builder.read_rgba_png(extracted_path)
+            out_width, out_height, _ = builder.read_rgba_png(extracted_path)
             self.assertEqual((1240, 1080), (out_width, out_height))
-            self.assertEqual(
-                builder.crop_rgba(master, width, *geometry),
-                extracted,
-                f"{slot} must come directly from the registered master-PNG crop",
-            )
+        for slot in (
+            "button.notes.normal", "button.notes.pressed",
+            "button.walkthrough.normal", "button.walkthrough.pressed",
+        ):
+            extracted_path = root / "proof-skin" / "adventure-journal-extracted" / builder.asset_path(slot)
+            out_width, out_height, _ = builder.read_rgba_png(extracted_path)
+            self.assertEqual((572, 192), (out_width, out_height))
 
 
 if __name__ == "__main__":

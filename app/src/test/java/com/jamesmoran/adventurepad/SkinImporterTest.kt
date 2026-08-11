@@ -115,7 +115,7 @@ class SkinImporterTest {
         val installed = install(proof).installedSkin
 
         assertEquals("org.adventurepad.proof.rainbow", installed.manifest.id)
-        assertEquals(17, installed.manifest.assets.size)
+        assertEquals(21, installed.manifest.assets.size)
     }
 
     private fun install(packageFile: File): SkinImportResult {

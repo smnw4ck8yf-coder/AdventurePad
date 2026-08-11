@@ -86,6 +86,14 @@ class LowerScreenNavigationTest {
         )
     }
 
+    @Test fun companionPrimaryActionGeometryIsFixedAndLeavesExpansionSpace() {
+        assertEquals(72, COMPANION_HEADER_HEIGHT_DP)
+        assertEquals(48, COMPANION_ACTION_TOP_OFFSET_DP)
+        assertEquals(96, COMPANION_ACTION_ROW_HEIGHT_DP)
+        assertEquals(16, COMPANION_ACTION_HORIZONTAL_PADDING_DP)
+        assertEquals(16, COMPANION_ACTION_GAP_DP)
+    }
+
     @Test fun utilityLabelsRenderExactlyOneConfiguredIcon() {
         assertEquals("📖  Companion", GameplayUtilityAction.COMPANION.displayLabel())
         assertEquals("⚙  Settings", GameplayUtilityAction.SETTINGS.displayLabel())

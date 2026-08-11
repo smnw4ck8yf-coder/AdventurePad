@@ -17,7 +17,7 @@ class RainbowProofSkinPackageTest {
                 archive.getInputStream(archive.getEntry("skin.json")).bufferedReader().use { it.readText() },
             )
             assertEquals("org.adventurepad.proof.rainbow", manifest.id)
-            assertEquals(17, manifest.assets.size)
+            assertEquals(21, manifest.assets.size)
             assertTrue(manifest.assets.keys.containsAll(SkinSlots.supportedV1 - setOf(
                 SkinSlots.LAUNCHER_BACKGROUND, SkinSlots.LAUNCHER_HEADER, SkinSlots.LAUNCHER_BRAND,
             )))

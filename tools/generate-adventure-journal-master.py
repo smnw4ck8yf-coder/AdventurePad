@@ -104,7 +104,7 @@ def make_assets(source: Image.Image, spec: dict) -> dict[str, Image.Image]:
         "panel.frame": material_panel(source, sizes["panel.frame"], "wood"),
         "preview": cover(source, sizes["preview"]),
     }
-    for control in ("lmb", "rmb", "companion", "settings"):
+    for control in ("lmb", "rmb", "companion", "settings", "notes", "walkthrough"):
         for state in ("normal", "pressed"):
             slot = f"button.{control}.{state}"
             assets[slot] = button(source, sizes[slot], state == "pressed")

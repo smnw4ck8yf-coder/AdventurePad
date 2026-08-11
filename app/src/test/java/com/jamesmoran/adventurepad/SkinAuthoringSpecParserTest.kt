@@ -7,12 +7,22 @@ import org.junit.Test
 
 class SkinAuthoringSpecParserTest {
     @Test
-    fun parsesBundledAuthoritativeV1Regions() {
+    fun parsesBundledAuthoritativeV2Regions() {
         val spec = SkinAuthoringSpecParser.parse(authoritativeSpec())
         assertEquals(SkinCanvas(4720, 4040), spec.masterCanvas)
-        assertEquals(17, spec.regions.size)
+        assertEquals(21, spec.regions.size)
         assertEquals("top.surround", spec.regions.first().slotId)
         assertEquals(SkinTransparentCenter(64, 64, 1112, 232, 0), spec.regions.first { it.slotId == SkinSlots.PANEL_FRAME }.transparentCenter)
+        listOf(
+            SkinSlots.BUTTON_NOTES_NORMAL,
+            SkinSlots.BUTTON_NOTES_PRESSED,
+            SkinSlots.BUTTON_WALKTHROUGH_NORMAL,
+            SkinSlots.BUTTON_WALKTHROUGH_PRESSED,
+        ).forEach { slot ->
+            val region = spec.regions.first { it.slotId == slot }
+            assertEquals(572, region.outputWidth)
+            assertEquals(192, region.outputHeight)
+        }
     }
 
     @Test

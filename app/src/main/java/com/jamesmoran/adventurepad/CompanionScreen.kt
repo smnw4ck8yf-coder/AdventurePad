@@ -7,10 +7,14 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +47,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
@@ -51,7 +56,12 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
@@ -65,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -104,6 +115,27 @@ private val ImmersiveInk = Color(0xFF322317)
 private val ImmersiveSecondaryInk = Color(0xFF66503A)
 private val ImmersiveOutline = Color(0x995E452E)
 private val ImmersiveControlScrim = Color(0x38FFF4D6)
+private val ImmersiveContentEdgeFadeHeight = 24.dp
+
+private fun Modifier.immersiveContentEdgeFade(): Modifier =
+    graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+        .drawWithContent {
+            drawContent()
+            if (size.height > 0f) {
+                val fadeHeight = ImmersiveContentEdgeFadeHeight.toPx()
+                    .coerceAtMost(size.height / 2f)
+                val fadeFraction = fadeHeight / size.height
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0f to Color.Transparent,
+                        fadeFraction to Color.Black,
+                        (1f - fadeFraction) to Color.Black,
+                        1f to Color.Transparent,
+                    ),
+                    blendMode = BlendMode.DstIn,
+                )
+            }
+        }
 
 @Composable
 internal fun CompanionScreen(
@@ -111,6 +143,7 @@ internal fun CompanionScreen(
     persistedNotes: String,
     walkthrough: WalkthroughDocument?,
     selectedSection: CompanionSection,
+    modifier: Modifier = Modifier,
     immersive: Boolean = false,
     statistics: CompanionStatistics,
     onNotesChanged: (String) -> Unit,
@@ -122,7 +155,6 @@ internal fun CompanionScreen(
     onSectionSelected: (CompanionSection) -> Unit,
     onBack: () -> Unit,
     onClose: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     var notesDraft by rememberSaveable(gameId) { mutableStateOf(persistedNotes) }
     var lastPersistedNotes by rememberSaveable(gameId) { mutableStateOf(persistedNotes) }
@@ -145,14 +177,20 @@ internal fun CompanionScreen(
                         title = if (selectedSection == CompanionSection.HOME) "COMPANION" else selectedSection.label.uppercase(),
                         showBack = selectedSection != CompanionSection.HOME,
                         immersive = immersive,
+                        showVisuals = !immersive || selectedSection != CompanionSection.HOME,
                         onBack = onBack,
                         onClose = onClose,
                     )
-                    HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
+                    if (!immersive || selectedSection != CompanionSection.HOME) {
+                        HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
+                    }
                 }
                 Box(Modifier.fillMaxSize()) {
                     when (selectedSection) {
-                        CompanionSection.HOME -> CompanionHome(onSectionSelected)
+                        CompanionSection.HOME -> CompanionHome(
+                            immersive = immersive,
+                            onOpen = onSectionSelected,
+                        )
                         CompanionSection.NOTES -> if (!isCompanionTargetAvailable(gameId)) {
                             PlaceholderSection(
                                 "Notes",
@@ -199,89 +237,186 @@ internal fun PageHeader(
     modifier: Modifier = Modifier,
     showBack: Boolean = false,
     immersive: Boolean = false,
+    showVisuals: Boolean = true,
     onBack: () -> Unit = {},
     onClose: () -> Unit,
 ) {
     Row(
-        modifier = modifier.fillMaxWidth().padding(
-            horizontal = AdventurePadDesign.contentPadding,
-            vertical = AdventurePadDesign.spacingSm,
-        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .height(COMPANION_HEADER_HEIGHT_DP.dp)
+            .background(
+                if (immersive && showVisuals) ImmersiveControlScrim else Color.Transparent,
+            )
+            .padding(horizontal = AdventurePadDesign.contentPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (showBack) TextButton(
-            onClick = onBack,
-            modifier = Modifier.align(Alignment.CenterVertically).width(48.dp).heightIn(min = 48.dp)
-                .semantics { contentDescription = "Back" },
-        ) {
+        if (showBack) {
+            CompanionBackButton(
+                onClick = onBack,
+                visible = showVisuals,
+                modifier = Modifier.align(Alignment.CenterVertically),
+            )
+        }
+        if (showVisuals) {
+            Text(
+                title,
+                color = if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.textPrimary,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+        } else {
+            Spacer(Modifier.weight(1f))
+        }
+        if (showVisuals) {
+            TextButton(
+                onClick = onClose,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
+                ),
+                modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
+                    .semantics { contentDescription = "Close" },
+            ) { Text(WALKTHROUGH_CLOSE_LABEL) }
+        } else {
+            InvisibleHitTarget(
+                description = "Close",
+                onClick = onClose,
+                modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget),
+            )
+        }
+    }
+}
+
+@Composable
+private fun InvisibleHitTarget(
+    description: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    Box(
+        modifier
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = description },
+    )
+}
+
+@Composable
+private fun CompanionBackButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    contentColor: Color? = null,
+    visible: Boolean = true,
+    contentPadding: PaddingValues = ButtonDefaults.TextButtonContentPadding,
+) {
+    TextButton(
+        onClick = onClick,
+        colors = if (!visible) ButtonDefaults.textButtonColors(contentColor = Color.Transparent)
+        else contentColor?.let { ButtonDefaults.textButtonColors(contentColor = it) }
+            ?: ButtonDefaults.textButtonColors(),
+        contentPadding = contentPadding,
+        modifier = modifier
+            .width(48.dp)
+            .heightIn(min = 48.dp)
+            .semantics { contentDescription = "Back" },
+    ) {
+        if (visible) {
             Text(
                 WALKTHROUGH_BACK_LABEL,
                 fontSize = COMPANION_BACK_ARROW_SIZE,
                 lineHeight = COMPANION_BACK_ARROW_SIZE,
                 modifier = Modifier.offset(y = (-6).dp),
-                )
+            )
         }
-        Text(
-            title,
-            color = if (immersive) ImmersiveInk else AdventurePadThemeTokens.colors.textPrimary,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(
-            onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(
-                contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
-            ),
-            modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
-                .semantics { contentDescription = "Close" },
-        ) { Text(WALKTHROUGH_CLOSE_LABEL) }
     }
 }
 
 @Composable
-private fun CompanionHome(onOpen: (CompanionSection) -> Unit) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
-        verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
+private fun CompanionHome(
+    immersive: Boolean,
+    onOpen: (CompanionSection) -> Unit,
+) {
+    Column {
+        // Move the complete original-height action row down by 48 dp.
+        Spacer(Modifier.height(COMPANION_ACTION_TOP_OFFSET_DP.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(COMPANION_ACTION_ROW_HEIGHT_DP.dp)
+                .padding(horizontal = COMPANION_ACTION_HORIZONTAL_PADDING_DP.dp),
+            horizontalArrangement = Arrangement.spacedBy(COMPANION_ACTION_GAP_DP.dp),
+        ) {
+            CompanionActionButton(
+                section = CompanionSection.NOTES,
+                skinButton = SkinnableButton.NOTES,
+                immersive = immersive,
+                onClick = { onOpen(CompanionSection.NOTES) },
+                modifier = Modifier.weight(1f).fillMaxSize(),
+            )
+            CompanionActionButton(
+                section = CompanionSection.WALKTHROUGH,
+                skinButton = SkinnableButton.WALKTHROUGH,
+                immersive = immersive,
+                onClick = { onOpen(CompanionSection.WALKTHROUGH) },
+                modifier = Modifier.weight(1f).fillMaxSize(),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompanionActionButton(
+    section: CompanionSection,
+    skinButton: SkinnableButton,
+    immersive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    Box(
+        modifier = modifier.then(
+            if (immersive) Modifier else Modifier
+                .background(
+                    AdventurePadThemeTokens.colors.surface,
+                    AdventurePadThemeTokens.shapes.medium,
+                )
+                .border(
+                    AdventurePadThemeTokens.components.subtleBorderWidth,
+                    AdventurePadThemeTokens.colors.outline,
+                    AdventurePadThemeTokens.shapes.medium,
+                ),
+        ),
     ) {
-        Text("Your game library", color = AdventurePadThemeTokens.colors.textSecondary)
-        listOf(
-            CompanionSection.NOTES to "Write clues and plans",
-            CompanionSection.WALKTHROUGH to "Read your imported reference",
-            CompanionSection.MANUAL to "Manuals and preservation material",
-            CompanionSection.DIALOGUE to "Recent dialogue",
-            CompanionSection.STATISTICS to "Game and display status",
-        ).forEach { (section, description) ->
-            val available = section.isAvailable
-            Column(
-                Modifier.fillMaxWidth()
-                    .background(AdventurePadThemeTokens.colors.surface, AdventurePadThemeTokens.shapes.medium)
-                    .border(AdventurePadThemeTokens.components.subtleBorderWidth, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium)
-                    .clickable(enabled = available) { onOpen(section) }
-                    .padding(horizontal = AdventurePadDesign.spacingLg, vertical = AdventurePadDesign.spacingMd),
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        section.label,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = if (available) AdventurePadThemeTokens.colors.textPrimary else AdventurePadThemeTokens.colors.textSecondary,
-                        modifier = Modifier.weight(1f),
-                    )
-                    if (!available) Text(
-                        COMPANION_COMING_SOON_LABEL,
-                        color = AdventurePadThemeTokens.colors.textSecondary,
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.small)
-                            .border(AdventurePadThemeTokens.components.subtleBorderWidth, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.small)
-                            .padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
-                    )
-                }
+        SkinArtwork(
+            skinButton.artworkCandidates(pressed),
+            Modifier.fillMaxSize(),
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = if (immersive) null else LocalIndication.current,
+                    role = Role.Button,
+                    onClick = onClick,
+                )
+                .semantics { contentDescription = section.label },
+            contentAlignment = Alignment.Center,
+        ) {
+            // Immersive v2 artwork supplies its own label. If these optional assets are
+            // absent, the transparent target preserves legacy companion.background UI.
+            if (!immersive) {
                 Text(
-                    description,
-                    color = if (available) AdventurePadThemeTokens.colors.textSecondary else AdventurePadThemeTokens.colors.textSecondary.copy(alpha = 0.65f),
-                    style = MaterialTheme.typography.bodyMedium,
+                    section.label,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
                 )
             }
         }
@@ -325,7 +460,10 @@ private fun NotesSection(notes: String, immersive: Boolean, onNotesChanged: (Str
                 focusedContainerColor = Color.Transparent,
                 unfocusedContainerColor = Color.Transparent,
             ) else OutlinedTextFieldDefaults.colors(),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .then(if (immersive) Modifier.immersiveContentEdgeFade() else Modifier),
         )
     }
 }
@@ -412,8 +550,9 @@ private fun WalkthroughImporter(
     Column(Modifier.fillMaxSize()) {
         WalkthroughToolbar(onBack = onBack, onClose = onClose, immersive = immersive)
         HorizontalDivider(color = if (immersive) ImmersiveOutline else AdventurePadThemeTokens.colors.outline)
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
+        AdventurePadScrollablePage(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(AdventurePadDesign.contentPadding),
             verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingMd),
         ) {
         when (step) {
@@ -524,12 +663,12 @@ private fun WalkthroughReader(
         mutableStateOf(ReaderSettingsState(preferences = document.preferences))
     }
     var collapsedIds by rememberSaveable(document.importedAt) { mutableStateOf(setOf<String>()) }
-    var currentResult by rememberSaveable(document.importedAt) { mutableStateOf(0) }
+    var currentResult by rememberSaveable(document.importedAt) { mutableIntStateOf(0) }
     var scrollRequest by remember(document.importedAt) {
         mutableStateOf(ReaderScrollRequest(document.resolvePosition(document.position), ReaderTargetAlignment.HEADING, 0))
     }
     var textLayout by remember(document.importedAt) { mutableStateOf<TextLayoutResult?>(null) }
-    var readerViewportHeight by remember(document.importedAt) { mutableStateOf(0) }
+    var readerViewportHeight by remember(document.importedAt) { mutableIntStateOf(0) }
     val results = remember(document.rawText, query) { searchWalkthrough(document, query) }
     val preferences = settingsState.preferences
     val display = remember(document.rawText, document.sections) {
@@ -703,7 +842,9 @@ private fun WalkthroughReader(
                     jumpTo(it.startOffset, ReaderTargetAlignment.HEADING)
                 },
                 immersive = immersive,
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (immersive) Modifier.immersiveContentEdgeFade() else Modifier),
             )
         } else {
             val activeResult = results.getOrNull(currentResult).takeIf { view == WalkthroughView.SEARCH }
@@ -723,6 +864,7 @@ private fun WalkthroughReader(
             }
             Box(
                 Modifier.fillMaxSize().background(if (immersive) Color.Transparent else palette.background)
+                    .then(if (immersive) Modifier.immersiveContentEdgeFade() else Modifier)
                     .onSizeChanged { readerViewportHeight = it.height },
             ) {
                 SelectionContainer {
@@ -762,20 +904,12 @@ private fun WalkthroughToolbar(
             .padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        TextButton(
+        CompanionBackButton(
             onClick = onBack,
-            colors = ButtonDefaults.textButtonColors(contentColor = toolbarContentColor),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
-            modifier = Modifier.align(Alignment.CenterVertically).width(48.dp).heightIn(min = 48.dp)
-                .semantics { contentDescription = "Back" },
-        ) {
-            Text(
-                WALKTHROUGH_BACK_LABEL,
-                fontSize = COMPANION_BACK_ARROW_SIZE,
-                lineHeight = COMPANION_BACK_ARROW_SIZE,
-                modifier = Modifier.offset(y = (-6).dp),
-                )
-        }
+            contentColor = toolbarContentColor,
+            contentPadding = PaddingValues(horizontal = AdventurePadDesign.spacingSm),
+            modifier = Modifier.align(Alignment.CenterVertically),
+        )
         Text(
             "WALKTHROUGH",
             style = MaterialTheme.typography.titleMedium,
@@ -803,7 +937,7 @@ private fun WalkthroughToolbar(
             ),
             modifier = Modifier.width(48.dp).heightIn(min = 48.dp)
                 .semantics { contentDescription = "Close walkthrough" },
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp),
+            contentPadding = PaddingValues(horizontal = AdventurePadDesign.spacingSm),
         ) { Text(WALKTHROUGH_CLOSE_LABEL) }
     }
 }
@@ -813,7 +947,7 @@ private fun CompactToolbarButton(label: String, description: String, color: Colo
     TextButton(
         onClick = onClick,
         colors = ButtonDefaults.textButtonColors(contentColor = color),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp),
         modifier = Modifier.heightIn(min = 40.dp).semantics { contentDescription = description },
     ) { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) }
 }
@@ -868,22 +1002,44 @@ private fun ReaderSettingChoices(
             horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingXs),
         ) {
             rowIndices.forEach { index ->
-                if (labels[index] == selectedLabel) {
-                    Button(
-                        onClick = { onSelected(index) },
-                        modifier = Modifier.weight(1f).heightIn(min = 40.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
-                    ) { Text(labels[index], maxLines = 1, style = MaterialTheme.typography.labelSmall) }
-                } else {
-                    OutlinedButton(
-                        onClick = { onSelected(index) },
-                        modifier = Modifier.weight(1f).heightIn(min = 40.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp),
-                    ) { Text(labels[index], maxLines = 1, style = MaterialTheme.typography.labelSmall) }
-                }
+                ReaderSettingChoice(
+                    label = labels[index],
+                    selected = labels[index] == selectedLabel,
+                    onClick = { onSelected(index) },
+                    modifier = Modifier.weight(1f),
+                )
             }
             repeat(columns - rowIndices.size) { Spacer(Modifier.weight(1f)) }
         }
+    }
+}
+
+@Composable
+private fun ReaderSettingChoice(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val content: @Composable () -> Unit = {
+        Text(label, maxLines = 1, style = MaterialTheme.typography.labelSmall)
+    }
+    val buttonModifier = modifier.heightIn(min = 40.dp)
+    val contentPadding = PaddingValues(horizontal = 6.dp)
+    if (selected) {
+        Button(
+            onClick = onClick,
+            modifier = buttonModifier,
+            contentPadding = contentPadding,
+            content = { content() },
+        )
+    } else {
+        OutlinedButton(
+            onClick = onClick,
+            modifier = buttonModifier,
+            contentPadding = contentPadding,
+            content = { content() },
+        )
     }
 }
 
@@ -942,13 +1098,13 @@ private fun WalkthroughSearchBar(
                 enabled = resultCount > 0,
                 onClick = onPrevious,
                 modifier = Modifier.width(48.dp).heightIn(min = 40.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
+                contentPadding = PaddingValues(AdventurePadDesign.spacingXs),
             ) { Text("↑", fontSize = WALKTHROUGH_SEARCH_ARROW_SIZE, lineHeight = WALKTHROUGH_SEARCH_ARROW_SIZE) }
             TextButton(
                 enabled = resultCount > 0,
                 onClick = onNext,
                 modifier = Modifier.width(48.dp).heightIn(min = 40.dp),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp),
+                contentPadding = PaddingValues(AdventurePadDesign.spacingXs),
             ) { Text("↓", fontSize = WALKTHROUGH_SEARCH_ARROW_SIZE, lineHeight = WALKTHROUGH_SEARCH_ARROW_SIZE) }
             TextButton(onClick = onDismiss) { Text("✕") }
         }
@@ -1012,8 +1168,9 @@ private fun ContentsPanel(
 ) {
     val parents = sections.mapNotNull { it.parentId }.toSet()
     val visible = visibleWalkthroughSections(sections, collapsedIds)
-    Column(
-        modifier.verticalScroll(rememberScrollState()).padding(
+    AdventurePadScrollablePage(
+        modifier = modifier,
+        contentPadding = PaddingValues(
             horizontal = AdventurePadDesign.spacingMd,
             vertical = AdventurePadDesign.spacingSm,
         ),
@@ -1045,8 +1202,9 @@ private fun ContentsPanel(
 
 @Composable
 private fun PlaceholderSection(title: String, message: String, supportingText: String? = null) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
+    AdventurePadScrollablePage(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(AdventurePadDesign.contentPadding),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingMd),
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -1063,8 +1221,9 @@ private fun PlaceholderSection(title: String, message: String, supportingText: S
 
 @Composable
 private fun StatisticsSection(statistics: CompanionStatistics) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(AdventurePadDesign.contentPadding),
+    AdventurePadScrollablePage(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(AdventurePadDesign.contentPadding),
         verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
     ) {
         StatisticRow("Current game / target", statistics.targetId.ifBlank { "Launcher / unknown" })

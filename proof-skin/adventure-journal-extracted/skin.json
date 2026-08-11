@@ -224,6 +224,66 @@
         "right": 24,
         "bottom": 24
       }
+    },
+    "button.notes.normal": {
+      "path": "assets/button/notes/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 572,
+        "height": 192
+      },
+      "sha256": "5af14e17ef42dde2428bfa7cabad505fa10aa24a36716be1e01042ab6c2573cf",
+      "sliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    "button.notes.pressed": {
+      "path": "assets/button/notes/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 572,
+        "height": 192
+      },
+      "sha256": "480df5a8fdf3c6de289778957c7229733af5cbf3e35cb895f2a36b4f6d221154",
+      "sliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    "button.walkthrough.normal": {
+      "path": "assets/button/walkthrough/normal.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 572,
+        "height": 192
+      },
+      "sha256": "5af14e17ef42dde2428bfa7cabad505fa10aa24a36716be1e01042ab6c2573cf",
+      "sliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    "button.walkthrough.pressed": {
+      "path": "assets/button/walkthrough/pressed.png",
+      "scale": "nineSlice",
+      "canvas": {
+        "width": 572,
+        "height": 192
+      },
+      "sha256": "480df5a8fdf3c6de289778957c7229733af5cbf3e35cb895f2a36b4f6d221154",
+      "sliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
     }
   },
   "colors": {
@@ -244,6 +304,6 @@
     "borderScale": 1.0
   },
   "extensions": {
-    "authoringTemplateVersion": "1.0.0"
+    "authoringTemplateVersion": "2.0.0"
   }
 }

@@ -21,6 +21,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -28,6 +29,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
@@ -53,6 +55,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -73,6 +77,9 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -95,12 +102,12 @@ import kotlin.math.sqrt
 class TrackpadActivity : ComponentActivity() {
     private var lifecycleEvent by mutableStateOf("INITIALIZING")
     private var lastLaunchResult by mutableStateOf("Waiting for launch details.")
-    private var receivedIntentFlags by mutableStateOf(0)
-    private var currentDisplayId by mutableStateOf(Display.INVALID_DISPLAY)
+    private var receivedIntentFlags by mutableIntStateOf(0)
+    private var currentDisplayId by mutableIntStateOf(Display.INVALID_DISPLAY)
     private var mouseDiagnostics by mutableStateOf(MouseDiagnostics())
     private var connectionDiagnostics by mutableStateOf(ScummVMConnectionDiagnostics())
     private var mirrorOutputStatus by mutableStateOf(MirrorOutputStatus())
-    private var gestureResetGeneration by mutableStateOf(0)
+    private var gestureResetGeneration by mutableIntStateOf(0)
     private var mirrorHost: MirrorHost? = null
     private var mirrorLifecycleActive = false
     private val mouseButtonSources = ScummVMMouseButton.entries.associateWith {
@@ -137,7 +144,7 @@ class TrackpadActivity : ComponentActivity() {
     private var cropEditTransaction: CropEditTransaction? = null
     private var lastCropAcknowledgement by mutableStateOf<CropAcknowledgement?>(null)
     private var cropSavePending by mutableStateOf(false)
-    private var activeCropGeneration by mutableStateOf(0L)
+    private var activeCropGeneration by mutableLongStateOf(0L)
     private val cropSaveGate = CropSaveGate()
     private val cropApplicationGate = MirrorCropApplicationGate()
     private var displayMode by mutableStateOf(DisplayMode.TRACKPAD)
@@ -1366,6 +1373,7 @@ private fun AdventurePadScreen(
                             onGestureDiagnostic = onGestureDiagnostic,
                             onButtonDown = onButtonDown,
                             onButtonUp = onButtonUp,
+                            immersive = interfaceStyle == InterfaceStyle.IMMERSIVE,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
@@ -1373,7 +1381,7 @@ private fun AdventurePadScreen(
                                 .padding(horizontal = AdventurePadDesign.spacingMd, vertical = 3.dp),
                         )
                         GameplayUtilityBar(
-                            isScummVMConnected = connectionDiagnostics.isConnected,
+                            immersive = interfaceStyle == InterfaceStyle.IMMERSIVE,
                             onOpenCompanion = { navigate(LowerScreenNavigationAction.OpenCompanion) },
                             onOpenSettings = { navigate(LowerScreenNavigationAction.OpenSettings) },
                         )
@@ -1410,17 +1418,21 @@ private fun AdventurePadScreen(
                 )
                 when (activePage) {
                     LowerScreenPage.COMPANION -> Box(
-                        Modifier
-                            .fillMaxSize()
-                            .padding(COMPANION_SAFE_CONTENT_INSET_DP.dp)
-                            .clip(AdventurePadThemeTokens.shapes.large)
-                            .then(
-                                if (paneTreatment == FunctionalPaneTreatment.OPAQUE) Modifier.border(
+                        Modifier.then(
+                            if (paneTreatment == FunctionalPaneTreatment.IMMERSIVE) {
+                                Modifier.fillMaxSize()
+                            } else {
+                                Modifier
+                                    .fillMaxSize(APPLICATION_PAGE_FRACTION)
+                                    .align(Alignment.Center)
+                                    .clip(AdventurePadThemeTokens.shapes.large)
+                                    .border(
                                     1.dp,
                                     AdventurePadThemeTokens.colors.outline,
                                     AdventurePadThemeTokens.shapes.large,
-                                ) else Modifier,
-                            ),
+                                    )
+                            },
+                        ),
                     ) {
                         CompanionScreen(
                             gameId = currentGameId,
@@ -1526,8 +1538,8 @@ private fun MirrorPrototypePanel(
     val mirrorHost = remember(context) { createMirrorHost(context) }
     val themeColors = AdventurePadThemeTokens.colors
     val componentStyles = AdventurePadThemeTokens.components
-    var panelWidth by remember { mutableStateOf(0) }
-    var panelHeightPixels by remember { mutableStateOf(0) }
+    var panelWidth by remember { mutableIntStateOf(0) }
+    var panelHeightPixels by remember { mutableIntStateOf(0) }
 
     DisposableEffect(mirrorHost) {
         onViewAvailable(mirrorHost)
@@ -1621,8 +1633,8 @@ private fun PointerSpeedSettings(
             .fillMaxWidth()
             .background(AdventurePadThemeTokens.colors.surface)
             .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(AdventurePadDesign.contentPadding),
+        verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingMd),
     ) {
         PageHeader(title = "SETTINGS", onClose = onClose)
         SettingsSectionTitle("GENERAL")
@@ -1634,35 +1646,17 @@ private fun PointerSpeedSettings(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
         ) {
             PointerSpeed.entries.forEach { option ->
-                OutlinedButton(
+                SettingsOptionButton(
+                    label = option.label,
+                    selected = option == pointerSpeed,
                     onClick = { onPointerSpeedSelected(option) },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (option == pointerSpeed) {
-                            AdventurePadThemeTokens.colors.surfacePressed
-                        } else {
-                            Color.Transparent
-                        },
-                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
-                    ),
-                    border = BorderStroke(
-                        width = if (option == pointerSpeed) 2.dp else 1.dp,
-                        color = if (option == pointerSpeed) AdventurePadThemeTokens.colors.textPrimary else AdventurePadThemeTokens.colors.outline,
-                    ),
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(
-                        text = option.label,
-                        fontWeight = if (option == pointerSpeed) {
-                            FontWeight.Bold
-                        } else {
-                            FontWeight.Normal
-                        },
-                        maxLines = 1,
-                    )
-                }
+                    emphasizeSelection = true,
+                    singleLine = true,
+                )
             }
         }
         Text(
@@ -1671,23 +1665,14 @@ private fun PointerSpeedSettings(
             fontWeight = FontWeight.Bold,
             style = MaterialTheme.typography.titleMedium,
         )
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm)) {
             DisplayMode.entries.forEach { mode ->
-                OutlinedButton(
+                SettingsOptionButton(
+                    label = if (mode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD",
+                    selected = displayModePreferences.preferredMode == mode,
                     onClick = { onPreferredDisplayModeChanged(mode) },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (displayModePreferences.preferredMode == mode) {
-                            AdventurePadThemeTokens.colors.surfacePressed
-                        } else {
-                            Color.Transparent
-                        },
-                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
-                    ),
-                    border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
                     modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (mode == DisplayMode.INTERFACE) "SPLIT VIEW" else "TRACKPAD")
-                }
+                )
             }
         }
         Text(
@@ -1704,22 +1689,15 @@ private fun PointerSpeedSettings(
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
         ) {
             InterfaceStyle.entries.forEach { style ->
-                OutlinedButton(
+                SettingsOptionButton(
+                    label = style.displayName,
+                    selected = style == interfaceStyle,
                     onClick = { onInterfaceStyleSelected(style) },
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = if (style == interfaceStyle) {
-                            AdventurePadThemeTokens.colors.surfacePressed
-                        } else {
-                            Color.Transparent
-                        },
-                        contentColor = AdventurePadThemeTokens.colors.textPrimary,
-                    ),
-                    border = BorderStroke(1.dp, AdventurePadThemeTokens.colors.outline),
                     modifier = Modifier.weight(1f),
-                ) { Text(style.displayName) }
+                )
             }
         }
         OutlinedButton(
@@ -1785,7 +1763,7 @@ private fun PointerSpeedSettings(
         SettingsSectionTitle("RECOVERY")
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
         ) {
             OutlinedButton(
                 onClick = onRestoreTrackpad,
@@ -1884,7 +1862,7 @@ private fun SkinSelectionDialog(
                         "INSTALLED CUSTOM SKINS",
                         color = AdventurePadThemeTokens.colors.textSecondary,
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(top = 8.dp),
+                        modifier = Modifier.padding(top = AdventurePadDesign.spacingSm),
                     )
                 }
                 installedSkins.forEach { skin ->
@@ -1975,6 +1953,47 @@ private fun ThemeSelectionDialog(
 }
 
 @Composable
+private fun SettingsOptionButton(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    emphasizeSelection: Boolean = false,
+    singleLine: Boolean = false,
+) {
+    OutlinedButton(
+        onClick = onClick,
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) {
+                AdventurePadThemeTokens.colors.surfacePressed
+            } else {
+                Color.Transparent
+            },
+            contentColor = AdventurePadThemeTokens.colors.textPrimary,
+        ),
+        border = BorderStroke(
+            width = if (selected && emphasizeSelection) 2.dp else 1.dp,
+            color = if (selected && emphasizeSelection) {
+                AdventurePadThemeTokens.colors.textPrimary
+            } else {
+                AdventurePadThemeTokens.colors.outline
+            },
+        ),
+        modifier = modifier,
+    ) {
+        Text(
+            text = label,
+            fontWeight = if (emphasizeSelection) {
+                if (selected) FontWeight.Bold else FontWeight.Normal
+            } else {
+                null
+            },
+            maxLines = if (singleLine) 1 else Int.MAX_VALUE,
+        )
+    }
+}
+
+@Composable
 private fun SettingsSectionTitle(title: String) {
     Text(
         text = title,
@@ -2001,7 +2020,7 @@ private fun MirrorCropEditor(
     val mirrorHost = remember(context) { createMirrorHost(context) }
     val themeColors = AdventurePadThemeTokens.colors
     val componentStyles = AdventurePadThemeTokens.components
-    var viewportHeight by remember { mutableStateOf(1) }
+    var viewportHeight by remember { mutableIntStateOf(1) }
     val latestModel by rememberUpdatedState(model)
 
     DisposableEffect(mirrorHost) {
@@ -2016,7 +2035,7 @@ private fun MirrorCropEditor(
             .background(AdventurePadThemeTokens.colors.surface)
             .border(2.dp, AdventurePadThemeTokens.colors.outline)
             .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -2089,13 +2108,13 @@ private fun MirrorCropEditor(
                 text = "GAME",
                 color = AdventurePadThemeTokens.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                modifier = Modifier.align(Alignment.TopStart).padding(AdventurePadDesign.spacingSm),
             )
             Text(
                 text = "SPLIT VIEW",
                 color = AdventurePadThemeTokens.colors.textPrimary,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.BottomStart).padding(8.dp),
+                modifier = Modifier.align(Alignment.BottomStart).padding(AdventurePadDesign.spacingSm),
             )
         }
         if (cropNeedsReview) {
@@ -2137,7 +2156,7 @@ private fun Float.formatOneDecimal(): String = String.format(Locale.ROOT, "%.1f"
 
 @Composable
 private fun GameplayUtilityBar(
-    isScummVMConnected: Boolean,
+    immersive: Boolean,
     onOpenCompanion: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
@@ -2151,14 +2170,14 @@ private fun GameplayUtilityBar(
             button = SkinnableButton.COMPANION,
             onClick = onOpenCompanion,
             label = GameplayUtilityAction.COMPANION.displayLabel(),
+            immersive = immersive,
         )
-        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-        ConnectionIndicator(isConnected = isScummVMConnected)
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         StatefulSkinUtilityButton(
             button = SkinnableButton.SETTINGS,
             onClick = onOpenSettings,
             label = GameplayUtilityAction.SETTINGS.displayLabel(),
+            immersive = immersive,
         )
     }
 }
@@ -2167,6 +2186,7 @@ private fun GameplayUtilityBar(
 private fun StatefulSkinUtilityButton(
     button: SkinnableButton,
     label: String,
+    immersive: Boolean,
     onClick: () -> Unit,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
@@ -2174,9 +2194,11 @@ private fun StatefulSkinUtilityButton(
     val density = LocalDensity.current
     var measuredSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     Box(
-        Modifier
-            .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
-            .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
+        Modifier.then(
+            if (immersive) Modifier else Modifier
+                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
+                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
+        ),
     ) {
         if (measuredSize != androidx.compose.ui.unit.IntSize.Zero) {
             val artworkSize = with(density) {
@@ -2187,28 +2209,31 @@ private fun StatefulSkinUtilityButton(
                 Modifier.size(artworkSize.width, artworkSize.height),
             )
         }
-        TextButton(
-            onClick = onClick,
-            interactionSource = interactionSource,
-            colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
-            modifier = Modifier
-                .heightIn(min = AdventurePadDesign.utilityTouchTarget)
-                .widthIn(min = 132.dp)
-                .onSizeChanged { measuredSize = it },
-        ) {
-            Text(text = label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+        val buttonModifier = Modifier
+            .heightIn(min = AdventurePadDesign.utilityTouchTarget)
+            .widthIn(min = 132.dp)
+            .onSizeChanged { measuredSize = it }
+            .semantics { contentDescription = label }
+        if (immersive) {
+            Box(
+                buttonModifier.clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    role = Role.Button,
+                    onClick = onClick,
+                ),
+            )
+        } else {
+            TextButton(
+                onClick = onClick,
+                interactionSource = interactionSource,
+                colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
+                modifier = buttonModifier,
+            ) {
+                Text(text = label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
-}
-
-@Composable
-private fun ConnectionIndicator(isConnected: Boolean) {
-    Text(
-        text = if (isConnected) "● Online" else "● Offline",
-        color = if (isConnected) AdventurePadThemeTokens.colors.connected else AdventurePadThemeTokens.colors.disconnected,
-        style = MaterialTheme.typography.labelSmall,
-        maxLines = 1,
-    )
 }
 
 @Composable
@@ -2221,6 +2246,7 @@ private fun TouchSurface(
     onGestureDiagnostic: (String) -> Unit,
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
+    immersive: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
@@ -2547,7 +2573,7 @@ private fun TouchSurface(
                     .height(overlayHeight),
             )
         }
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        if (!immersive) Canvas(modifier = Modifier.fillMaxSize()) {
             val overlayGeometry = calculateTrackpadOverlayGeometry(
                 width = size.width,
                 height = size.height,
@@ -2587,7 +2613,7 @@ private fun TouchSurface(
             )
             drawCircle(componentStyles.trackpadMarker, radius = radius, center = markerCenter)
         }
-        Text(
+        if (!immersive) Text(
             text = "Left",
             color = AdventurePadThemeTokens.colors.textSecondary,
             fontWeight = FontWeight.Medium,
@@ -2596,7 +2622,7 @@ private fun TouchSurface(
                 .align(Alignment.BottomStart)
                 .padding(start = AdventurePadDesign.spacingLg, bottom = AdventurePadDesign.spacingMd),
         )
-        Text(
+        if (!immersive) Text(
             text = "Right",
             color = AdventurePadThemeTokens.colors.textSecondary,
             fontWeight = FontWeight.Medium,

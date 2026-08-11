@@ -31,7 +31,23 @@ internal fun lowerPageBackgroundCandidates(
 
 internal enum class FunctionalPaneTreatment { OPAQUE, IMMERSIVE }
 
-/** Only the two proof surfaces may surrender their native opaque pane to exact skin artwork. */
+internal fun isImmersiveGameSurface(
+    page: LowerScreenPage,
+    companionSection: CompanionSection,
+): Boolean = when (page) {
+    LowerScreenPage.GAMEPLAY -> true
+    LowerScreenPage.COMPANION -> companionSection in setOf(
+        CompanionSection.HOME,
+        CompanionSection.NOTES,
+        CompanionSection.WALKTHROUGH,
+    )
+    LowerScreenPage.SETTINGS -> false
+}
+
+/**
+ * Game surfaces may surrender native decoration to exact skin artwork. Settings, skin
+ * management, and configuration remain opaque application UI by policy.
+ */
 internal fun functionalPaneTreatment(
     interfaceStyle: InterfaceStyle,
     page: LowerScreenPage,
@@ -40,7 +56,7 @@ internal fun functionalPaneTreatment(
 ): FunctionalPaneTreatment = if (
     interfaceStyle == InterfaceStyle.IMMERSIVE &&
     page == LowerScreenPage.COMPANION &&
-    companionSection in setOf(CompanionSection.NOTES, CompanionSection.WALKTHROUGH) &&
+    isImmersiveGameSurface(page, companionSection) &&
     hasExactArtwork
 ) {
     FunctionalPaneTreatment.IMMERSIVE

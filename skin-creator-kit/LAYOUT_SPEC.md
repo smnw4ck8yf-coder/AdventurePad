@@ -16,9 +16,9 @@ Split View can expand the selected upper source crop to a different presentation
 
 ## Lower gameplay contract
 
-The normal layout selects `bottom.trackpad.background` beneath a weighted `TouchSurface` and native utility row. The surface has 12 dp horizontal and 3 dp vertical outer padding. Its LMB and RMB regions are each 34% of surface width and have height `clamp(22% of surface height, 56 dp, 88 dp)`. The touch-target and artwork bounds are the same. Native Compose draws the Left/Right labels.
+The normal layout selects `bottom.trackpad.background` beneath a weighted `TouchSurface` and utility row. The surface has 12 dp horizontal and 3 dp vertical outer padding. Its LMB and RMB regions are each 34% of surface width and have height `clamp(22% of surface height, 56 dp, 88 dp)`. The touch-target and artwork bounds are the same. Standard style draws native Left/Right labels, borders, feedback overlays, and the lower-screen position marker. Immersive hides those native visuals while preserving the same hit targets and state-aware artwork.
 
-The utility row has 12 dp horizontal and 4 dp vertical padding. Companion and Settings have minimum bounds of 132×56 dp and select their state-aware artwork beneath native labels; the connection indicator remains intrinsic native text centered by weighted spacers.
+The utility row has 12 dp horizontal and 4 dp vertical padding. Companion and Settings have minimum bounds of 132×56 dp and select their state-aware artwork. Standard draws their native labels and chrome; Immersive leaves the same controls invisible above the supplied art. The Trackpad screen has no connection-status indicator.
 
 Split View selects `bottom.split.background`, then puts a live mirrored crop above it and the same weighted trackpad/utility layout. Its height is:
 
@@ -28,15 +28,15 @@ The split ratio ranges from 0.05 through 0.95, defaults to 0.75, and snaps to a 
 
 ## Companion, Notes, and Walkthrough
 
-Standard Interface Style places the existing opaque native page over these backgrounds. Immersive removes that pane only for Notes and Walkthrough when their exact artwork is installed; native layout, controls, scrolling, accessibility, and keyboard behavior do not move. Creators should keep the marked Notes editor and Walkthrough reading areas pale and low-contrast for dark native text. Companion remains Standard.
+Standard Interface Style places an opaque native page over these backgrounds. With exact artwork installed, Immersive makes Companion, Notes, and Walkthrough full lower-display surfaces. Native input, scrolling, accessibility, and keyboard behavior remain runtime-owned. Creators should keep the marked Notes editor and Walkthrough reading areas pale and low-contrast for dark native text.
 
-These pages remain centered native overlays occupying 94% of the safe-drawing width and height. Their background assets theme the lower display beneath/around the unchanged page: `companion.background`, `notes.background`, and `walkthrough.background`. Each missing screen asset independently retains native rendering.
+In Standard they are centered native overlays occupying 94% of safe-drawing width and height. In Immersive each exact asset fills the surface; a missing screen asset independently falls back to opaque native rendering.
 
-- Companion uses `PageHeader`: 16 dp horizontal and 8 dp vertical padding, optional 48×48 dp-min back control, and a 48 dp-wide/56 dp-min close control. Home content scrolls with 16 dp padding and 8 dp card gaps.
+- Companion has a fixed 72 dp header, followed by a 48 dp vertical offset and a fixed 96 dp action row. The complete original-height buttons are shifted down by 48 dp; neither edge remains at its former position. The row has 16 dp horizontal padding and a 16 dp gap; each action is 286×96 dp in the 620×540 dp reference layout. At 2 px/dp, Notes is exactly `[32,240,604,432]` and Walkthrough is exactly `[636,240,1208,432]`. Immersive draws no native title, action labels, backgrounds, outlines, or ripple. Artists paint the title and surrounding decoration into `companion.background`, then paint action visuals into the dedicated 572×192 normal/pressed Notes and Walkthrough assets. The larger area below remains open for future fixed actions. Artists never define coordinates. Older skins without the four action assets retain their existing background/native fallback; older dedicated assets remain loadable and are scaled into the current runtime bounds.
 - Notes uses the same header, then 16 dp content padding and an 8 dp gap around an auto-save message and weighted editor. The editor has at least eight lines and resizes for the keyboard via `adjustResize`; Done is the IME action.
 - Walkthrough uses an 8 dp horizontal/4 dp vertical toolbar. Back and close are at least 48×48 dp. Reader, Search, Contents, and More are conditional intrinsic-width controls with 40 dp minimum height. Reader settings, search, contents, menus, and scrolling text make the remaining area dynamic.
 
-Decorative styling must preserve native text, outlines, focus/press feedback, reader palettes, and search-highlight contrast.
+Decorative styling must preserve Notes/Walkthrough native text, editor behavior, reader controls, focus semantics, reader palettes, and search-highlight contrast.
 
 ## Button and state contract
 
@@ -44,7 +44,7 @@ LMB and RMB declare 528×224 source canvases and use nine-slice rendering with 4
 
 Companion and Settings remain native Compose controls with minimum 132×56 dp touch targets. Hover, focused, and disabled artwork is not required in v1; native semantics/focus/disabled behavior remains independent.
 
-All artwork must be label-free. Compose remains authoritative for visible text, localization, semantics, and accessibility.
+Standard style remains authoritative for visible native text. Immersive-oriented artwork should include the visual labels identified by the guides because native labels and chrome are hidden there. Compose remains authoritative for semantics, accessibility, localization metadata, and interaction.
 
 ## `panel.frame`
 

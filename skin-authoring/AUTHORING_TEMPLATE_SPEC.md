@@ -1,6 +1,11 @@
-# AdventurePad canonical skin authoring template v1
+# AdventurePad canonical skin authoring template v2
 
-This directory documents the artist-facing registration for AdventurePad's single-PNG Skin Builder. Use `AdventurePad-Skin-Template-v1.svg` and the flattened reference PNG as layout aids, then export one **4720×4040 sRGB PNG** containing only the finished artwork. The creator submits that one PNG; AdventurePad validates its dimensions, slices every registered region, generates the internal assets and metadata, and installs the selectable skin.
+This directory documents the artist-facing registration for AdventurePad's single-PNG Skin Builder. It contains two distinct authoring assets:
+
+- `AdventurePad-Skin-Template-v2-reference.svg` and `AdventurePad-Skin-Template-v2-reference.png` are the labelled reference/learning template. They explain the regions and authoring constraints; never submit the guide/reference file as a skin.
+- `AdventurePad-Skin-Template-v2.svg` and `AdventurePad-Skin-Template-v2.png` are the canonical production canvas. Visible boundaries and labels sit entirely in non-runtime gutters, leaving every registered region ready to paint.
+
+Start finished artwork from the Creator Canvas, paint every required region, and export one **4720×4040 sRGB PNG**. The creator submits only that final PNG; AdventurePad validates its dimensions, slices every registered region, generates the internal assets and metadata, and installs the selectable skin.
 
 Creators do not build `.apskin` archives, manifests, folders, or individual assets. Those are internal AdventurePad implementation details. Guide graphics and labels are reference-only and must be hidden or painted over in the submitted master PNG.
 
@@ -37,6 +42,10 @@ The master canvas is **4720×4040 px**. Coordinates use a top-left origin and ex
 | `button.companion.pressed` | 2856,3560 | 264×112 | `nineSlice` | `rgba` | 24/24/24/24 |
 | `button.settings.normal` | 3200,3560 | 264×112 | `nineSlice` | `rgba` | 24/24/24/24 |
 | `button.settings.pressed` | 3544,3560 | 264×112 | `nineSlice` | `rgba` | 24/24/24/24 |
+| `button.notes.normal` | 80,3848 | 572×192 | `nineSlice` | `rgba` | 32/32/32/32 |
+| `button.notes.pressed` | 732,3848 | 572×192 | `nineSlice` | `rgba` | 32/32/32/32 |
+| `button.walkthrough.normal` | 1384,3848 | 572×192 | `nineSlice` | `rgba` | 32/32/32/32 |
+| `button.walkthrough.pressed` | 2036,3848 | 572×192 | `nineSlice` | `rgba` | 32/32/32/32 |
 
 ## Authoring rules
 
@@ -48,21 +57,21 @@ The master canvas is **4720×4040 px**. Coordinates use a top-left origin and ex
 
 Every 1240×1080 lower artboard represents screen pixels only. The zero-inset, 2 px/dp rectangles are reference geometry, not a density or inset guarantee. Native content, labels, touch targets, scrolling, keyboard resizing, and `WindowInsets.safeDrawing` remain runtime-owned.
 
-Split View has no fixed transparent cutout. Export all of `bottom.split.background`; runtime geometry sizes and layers the mirror above it. Companion, Notes, and Walkthrough retain centered 94% native layouts. In Standard style the native page is opaque. In Immersive style only Notes and Walkthrough remove that opaque pane when their exact artwork exists, so keep their marked text areas pale, quiet, and readable beneath native dark text. Page bounds, dynamic controls, scrolling areas, and optional frame placement remain guides only.
+Split View has no fixed transparent cutout. Export all of `bottom.split.background`; runtime geometry sizes and layers the mirror above it. In Standard style Companion, Notes, and Walkthrough retain centered 94% opaque native pages. With exact artwork in Immersive style they become full lower-display game surfaces. Companion uses a fixed 72 dp header, a 48 dp top offset, and a fixed 96 dp action row: Notes on the left and Walkthrough on the right, with 16 dp outer padding and a 16 dp gap. Both edges of the original-height buttons move down by 48 dp. In the 2 px/dp reference this produces exact 572×192 px hit regions at `[32,240,604,432]` and `[636,240,1208,432]`. Paint the Companion title and surrounding decoration into `companion.background`; paint the two action appearances and labels into their dedicated normal/pressed assets. AdventurePad owns the fixed hit targets and never asks artists for coordinates. Keep Notes and Walkthrough content areas pale, quiet, and readable beneath native dark text, and preserve their marked header areas.
 
 ### Buttons and panel frame
 
-Normal and pressed button artwork are separate groups. Keep artwork label-free: AdventurePad draws Left/Right, COMPANION, and SETTINGS natively. Suggested nine-slice borders are registration metadata and visible guides; avoid essential detail in stretchable centers.
+Normal and pressed button artwork are separate groups. Standard style draws native labels. Immersive style hides native labels and chrome, so immersive-oriented artwork should visually identify its fixed hit regions. Notes and Walkthrough use their exact 572×192 px reference hit-area geometry. Suggested nine-slice borders are registration metadata and visible guides; avoid essential detail in stretchable centers.
 
 `panel.frame` requires an RGBA image whose inner rectangle `(64,64)` through `(1176,296)` is fully transparent. Runtime draws only the eight border patches and intentionally omits the center patch.
 
 ### Preview
 
-`preview` is the only required v1 package image. It is a 1200×675 opaque catalog/confirmation image and is never rendered as application UI.
+`preview` is the only required package image. It is a 1200×675 opaque catalog/confirmation image and is never rendered as application UI.
 
-## Scope relative to runtime v1
+## Scope relative to the runtime skin contract
 
-The authoritative sources agree on the dimensions and behavior of all 17 included regions. `trackpad.surface` remains a separate runtime asset and is therefore included.
+The authoritative sources agree on the dimensions and behavior of all 21 included regions. `trackpad.surface` remains a separate runtime asset and is therefore included.
 
 The runtime format also recognizes optional `launcher.background`, `launcher.header`, and `launcher.brand` slots. They are intentionally absent from this focused gameplay/lower-screen template. Legacy compatibility slots (`bottom.background`, `trackpad.button.left`, `trackpad.button.right`) are likewise not authoritative creator slots.
 

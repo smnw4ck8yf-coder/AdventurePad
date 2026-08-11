@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "templateVersion": "1.0.0",
-  "templateFile": "AdventurePad-Skin-Template-v1.svg",
+  "templateVersion": "2.0.0",
+  "templateFile": "AdventurePad-Skin-Template-v2.png",
   "masterCanvas": {
     "width": 4720,
     "height": 4040,
@@ -10,7 +10,7 @@
   "coordinates": "Master-canvas pixels; origins are top-left; right and bottom are exclusive.",
   "layerContract": {
     "GUIDE_BACKGROUNDS": "Non-exporting artboard/reference backdrops placed below artwork for editing visibility.",
-    "ARTWORK": "Editable, label-free artist content. One child group per slot ID.",
+    "ARTWORK": "Editable artist content. One child group per slot ID; Immersive artwork supplies visual labels where the guides require them.",
     "GUIDES": "Non-exporting geometry, safe/protected/dynamic regions, inset and nine-slice guides.",
     "LABELS": "Non-exporting dimensions and explanatory/native-label annotations.",
     "REGISTRATION": "Hidden machine-readable rectangles mirroring JSON registration data."
@@ -446,6 +446,114 @@
         "top": 24,
         "right": 24,
         "bottom": 24
+      }
+    },
+    {
+      "index": 18,
+      "slotId": "button.notes.normal",
+      "svgArtworkGroupId": "button.notes.normal",
+      "origin": {
+        "x": 80,
+        "y": 3848
+      },
+      "size": {
+        "width": 572,
+        "height": 192
+      },
+      "output": {
+        "width": 572,
+        "height": 192,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    {
+      "index": 19,
+      "slotId": "button.notes.pressed",
+      "svgArtworkGroupId": "button.notes.pressed",
+      "origin": {
+        "x": 732,
+        "y": 3848
+      },
+      "size": {
+        "width": 572,
+        "height": 192
+      },
+      "output": {
+        "width": 572,
+        "height": 192,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    {
+      "index": 20,
+      "slotId": "button.walkthrough.normal",
+      "svgArtworkGroupId": "button.walkthrough.normal",
+      "origin": {
+        "x": 1384,
+        "y": 3848
+      },
+      "size": {
+        "width": 572,
+        "height": 192
+      },
+      "output": {
+        "width": 572,
+        "height": 192,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
+      }
+    },
+    {
+      "index": 21,
+      "slotId": "button.walkthrough.pressed",
+      "svgArtworkGroupId": "button.walkthrough.pressed",
+      "origin": {
+        "x": 2036,
+        "y": 3848
+      },
+      "size": {
+        "width": 572,
+        "height": 192
+      },
+      "output": {
+        "width": 572,
+        "height": 192,
+        "format": "png"
+      },
+      "alphaMode": "rgba",
+      "scaleMode": "nineSlice",
+      "requiredByRuntime": false,
+      "nineSliceInsets": {
+        "left": 32,
+        "top": 32,
+        "right": 32,
+        "bottom": 32
       }
     }
   ],

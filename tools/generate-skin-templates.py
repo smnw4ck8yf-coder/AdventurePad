@@ -2,6 +2,7 @@
 """Generate Milestone 7 creator-facing guides; never generates skin artwork."""
 
 from pathlib import Path
+import json
 import shutil
 import subprocess
 
@@ -19,6 +20,20 @@ RED = "#ff5b63"        # live/protected/transparent
 GREEN = "#4ddd8b"      # artwork-safe
 AMBER = "#ffc857"      # native controls/text
 MAGENTA = "#dc78ff"    # runtime/system inset
+
+LAYOUT_SPEC = json.loads((ROOT / "skin-creator-kit" / "LAYOUT_SPEC.json").read_text(encoding="utf-8"))
+REFERENCE_SCENARIO = LAYOUT_SPEC["coordinateConventions"]["referenceScenario"]
+COMPANION_LAYOUT = LAYOUT_SPEC["surfaces"]["companion"]
+COMPANION_ACTIONS = COMPANION_LAYOUT["primaryActions"]
+REFERENCE_DENSITY_PX_PER_DP = int(REFERENCE_SCENARIO["densityPxPerDp"])
+COMPANION_REFERENCE_WIDTH_PX = REFERENCE_SCENARIO["canvas"][0]
+COMPANION_HEADER_HEIGHT_DP = COMPANION_LAYOUT["header"]["heightDp"]
+COMPANION_ACTION_TOP_OFFSET_DP = COMPANION_ACTIONS["topOffsetDp"]
+COMPANION_ACTION_HEIGHT_DP = COMPANION_ACTIONS["rowHeightDp"]
+COMPANION_HORIZONTAL_PADDING_DP = COMPANION_ACTIONS["horizontalPaddingDp"]
+COMPANION_ACTION_GAP_DP = COMPANION_ACTIONS["gapDp"]
+COMPANION_HEADER_CLOSE_WIDTH_DP = 48
+COMPANION_UTILITY_TOUCH_TARGET_DP = 56
 
 
 def esc(value: str) -> str:
@@ -38,9 +53,10 @@ class Svg:
             f'<text x="38" y="82" font-family="Arial,sans-serif" font-size="18" fill="{MUTED}">{esc(subtitle)}</text>',
         ]
 
-    def rect(self, x, y, w, h, color, label="", fill_opacity=.12, dash="", stroke=4, rx=0):
+    def rect(self, x, y, w, h, color, label="", fill_opacity=.12, dash="", stroke=4, rx=0, element_id=None):
         dash_attr = f' stroke-dasharray="{dash}"' if dash else ""
-        self.parts.append(f'<rect x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{color}" fill-opacity="{fill_opacity}" stroke="{color}" stroke-width="{stroke}"{dash_attr}/>' )
+        id_attr = f' id="{element_id}"' if element_id else ""
+        self.parts.append(f'<rect{id_attr} x="{x}" y="{y}" width="{w}" height="{h}" rx="{rx}" fill="{color}" fill-opacity="{fill_opacity}" stroke="{color}" stroke-width="{stroke}"{dash_attr}/>' )
         if label:
             self.text(x + 12, y + 28, label, color, 19, bold=True)
 
@@ -109,7 +125,7 @@ def bottom_base(title, subtitle):
 
 def bottom_trackpad():
     s = bottom_base("BOTTOM — NORMAL TRACKPAD", "Exact canvas 1240×1080 px; source constants shown in dp/fractions; reference scenario is explicitly conditional")
-    s.pattern_rect(24, 6, 1192, 940, "dynamic", CYAN, "TouchSurface 1192×940 px in reference scenario")
+    s.pattern_rect(24, 6, 1192, 940, "dynamic", CYAN, "")
     s.rect(24, 770, 405, 176, RED, "LMB touch + artwork", .15, stroke=4)
     s.rect(811, 770, 405, 176, RED, "RMB touch + artwork", .15, stroke=4)
     s.rect(24, 6, 1192, 764, GREEN, "Trackpad gesture area (excluding current L/R overlays)", .055, stroke=3)
@@ -117,7 +133,6 @@ def bottom_trackpad():
     s.rect(864, 826, 300, 88, AMBER, "native label safe zone", .04, "12 8", 2)
     s.rect(24, 952, 264, 112, AMBER, "COMPANION min 132×56 dp", .11, stroke=4, rx=14)
     s.rect(976, 952, 264, 112, AMBER, "SETTINGS min 132×56 dp", .11, stroke=4, rx=14)
-    s.rect(500, 972, 240, 72, AMBER, "● Online / Offline", .06, "10 8", 3)
     s.line(0, 952, 1240, 952, CYAN, 4, "18 10")
     s.note(350, 120, [
         "SOURCE-BACKED PLACEMENT",
@@ -125,6 +140,9 @@ def bottom_trackpad():
         "L/R width = 34% of TouchSurface each.",
         "L/R height = clamp(22% of surface, 56 dp, 88 dp).",
         "Utility row padding: horizontal 12 dp; vertical 4 dp.",
+        "Companion and Settings each use separate NORMAL/PRESSED assets shown below.",
+        "No connection-status text is rendered on this screen.",
+        "Immersive hides native labels, borders, marker, and button chrome.",
         "Trackpad is weighted; height changes with insets/window size.",
     ], 610)
     s.legend(1050)
@@ -165,15 +183,71 @@ def page_frame(title, subtitle, walkthrough=False):
 
 
 def companion():
-    s, hh = page_frame("COMPANION — HOME / companion.background", "Background themes full lower display beneath unchanged centered 94% native page")
-    s.rect(55, 48, 96, 112, AMBER, "", .08, "10 8", 2)
-    s.text(103, 113, "back*", AMBER, 16, True, "middle")
-    s.rect(1087, 48, 96, 112, AMBER, "", .08, "10 8", 2)
-    s.text(1135, 113, "close", AMBER, 16, True, "middle")
-    s.pattern_rect(69, 32 + hh + 34, 1102, 820, "dynamic", CYAN, "Scrollable content: 16 dp padding, 8 dp gaps")
-    for y, label in [(250, "NOTES"), (380, "WALKTHROUGH"), (510, "MANUAL"), (640, "RECENT DIALOGUE"), (770, "STATISTICS")]:
-        s.rect(85, y, 1070, 96, AMBER, label + " — native card/text", .035, stroke=2, rx=12)
-    s.note(330, 870, ["DECORATION RULE", "Background colors may theme the page; do not reduce native text contrast.", "Home cards and availability labels are dynamic native content."], 600)
+    s = bottom_base(
+        "COMPANION — HOME / companion.background",
+        "Fixed runtime-owned geometry: full immersive surface, title at top, Notes left, Walkthrough right",
+    )
+    density = REFERENCE_DENSITY_PX_PER_DP
+    header_height = COMPANION_HEADER_HEIGHT_DP * density
+    action_top = header_height + COMPANION_ACTION_TOP_OFFSET_DP * density
+    action_height = COMPANION_ACTION_HEIGHT_DP * density
+    horizontal_padding = COMPANION_HORIZONTAL_PADDING_DP * density
+    action_gap = COMPANION_ACTION_GAP_DP * density
+    action_width = (COMPANION_REFERENCE_WIDTH_PX - 2 * horizontal_padding - action_gap) // 2
+    walkthrough_x = horizontal_padding + action_width + action_gap
+    close_width = COMPANION_HEADER_CLOSE_WIDTH_DP * density
+    close_height = COMPANION_UTILITY_TOUCH_TARGET_DP * density
+    close_x = COMPANION_REFERENCE_WIDTH_PX - horizontal_padding - close_width
+    close_y = (header_height - close_height) // 2
+    safe_inset = horizontal_padding
+    s.rect(0, 0, 1240, header_height, AMBER, "", .10, stroke=4)
+    s.rect(
+        horizontal_padding, close_y, close_x - horizontal_padding, close_height,
+        GREEN, "TITLE / DECORATIVE HEADER ART", .035, "16 10", 3,
+        element_id="companion-header-art-safe-area",
+    )
+    s.rect(
+        close_x, close_y, close_width, close_height,
+        AMBER, "CLOSE 48×56 dp", .12, "10 7", 3, rx=10,
+        element_id="companion-header-close-hit-area",
+    )
+    s.text(620, 132, "HEADER 72 dp • CLOSE HIT TARGET IS RUNTIME-OWNED", AMBER, 17, True, "middle")
+    s.rect(
+        horizontal_padding, action_top, action_width, action_height,
+        CYAN, "NOTES BUTTON — FIXED HIT AREA 286×96 dp", .10, stroke=5, rx=14,
+        element_id="companion-notes-hit-area",
+    )
+    s.rect(
+        horizontal_padding + safe_inset, action_top + safe_inset,
+        action_width - 2 * safe_inset, action_height - 2 * safe_inset,
+        GREEN, "RECOMMENDED ART SAFE", .035, "10 7", 2, rx=8,
+        element_id="companion-notes-art-safe-area",
+    )
+    s.rect(
+        walkthrough_x, action_top, action_width, action_height,
+        CYAN, "WALKTHROUGH BUTTON — FIXED HIT AREA 286×96 dp", .10, stroke=5, rx=14,
+        element_id="companion-walkthrough-hit-area",
+    )
+    s.rect(
+        walkthrough_x + safe_inset, action_top + safe_inset,
+        action_width - 2 * safe_inset, action_height - 2 * safe_inset,
+        GREEN, "RECOMMENDED ART SAFE", .035, "10 7", 2, rx=8,
+        element_id="companion-walkthrough-art-safe-area",
+    )
+    open_area_y = action_top + action_height + 32
+    s.pattern_rect(
+        horizontal_padding, open_area_y, COMPANION_REFERENCE_WIDTH_PX - 2 * horizontal_padding,
+        1016 - open_area_y, "dynamic", GREEN,
+        "OPEN AREA — reserved for future fixed Companion actions",
+    )
+    s.note(300, 560, [
+        "IMMERSIVE AUTHORING RULE",
+        "Paint the Companion title and surrounding decoration into this background.",
+        "Dedicated Notes/Walkthrough normal/pressed assets supply action art and labels.",
+        "Hit areas are fixed by AdventurePad; artists never define interaction coordinates.",
+        "Dashed green areas are recommended 16 dp essential-art margins.",
+        "Standard supplies visible header/buttons; runtime still owns semantics and press input.",
+    ], 720)
     s.legend(1050)
     return s
 
@@ -213,8 +287,8 @@ def button(title, state, runtime, utility=False):
         s.text(w / 2, 24, f"{title} — {state.upper()}", WHITE, 16, True, "middle")
         s.rect(18, 36, w - 36, 58, AMBER, "", .07, "9 6", 2, 8)
         s.text(w / 2, 55, "132×56 dp minimum @ 2× reference", MUTED, 10, False, "middle")
-        s.text(w / 2, 74, "NATIVE LABEL SAFE ZONE", AMBER, 10, True, "middle")
-        s.text(w / 2, 91, "NO BAKED-IN LABEL", RED, 10, True, "middle")
+        s.text(w / 2, 74, "STANDARD NATIVE LABEL ZONE", AMBER, 10, True, "middle")
+        s.text(w / 2, 91, "IMMERSIVE ART MAY SUPPLY LABEL", CYAN, 9, True, "middle")
         s.text(w / 2, 103, "suggested slice: 24 px", GREEN, 9, True, "middle")
     else:
         s.text(24, 34, f"{title} — {state.upper()}", WHITE, 22, True)
@@ -222,10 +296,30 @@ def button(title, state, runtime, utility=False):
         s.rect(inset, 50, w - 2 * inset, 142, GREEN, "", .08, "12 8", 3, 10)
         s.text(w / 2, 70, "suggested nine-slice inset: 48 px", GREEN, 13, True, "middle")
         s.rect(int(w * .15), 86, int(w * .70), 72, AMBER, "", .08, "10 7", 3)
-        s.text(w / 2, 116, "NATIVE LABEL SAFE ZONE", AMBER, 16, True, "middle")
-        s.text(w / 2, 140, "NO BAKED-IN LABELS", AMBER, 13, True, "middle")
+        s.text(w / 2, 116, "STANDARD NATIVE LABEL ZONE", AMBER, 16, True, "middle")
+        s.text(w / 2, 140, "IMMERSIVE ART MAY SUPPLY LABEL", CYAN, 13, True, "middle")
         s.text(w / 2, 181, f"ASSET STATE: {state.upper()} — VISUAL CHANGE ONLY", CYAN, 12, True, "middle")
         s.text(w / 2, 210, "runtime: width 34%; height clamp(22%, 56…88 dp)", MUTED, 12, False, "middle")
+    return s
+
+
+def companion_action_button(title, state):
+    rect = COMPANION_ACTIONS[
+        "notesReferenceRectPx" if title == "NOTES" else "walkthroughReferenceRectPx"
+    ]
+    w, h = rect[2] - rect[0], rect[3] - rect[1]
+    inset = COMPANION_HORIZONTAL_PADDING_DP * REFERENCE_DENSITY_PX_PER_DP
+    s = Svg(w, h, "", "")
+    s.parts.append(
+        f'<rect x="8" y="6" width="{w-16}" height="{h-12}" rx="12" '
+        'fill="#101820" fill-opacity=".92"/>'
+    )
+    s.text(18, 30, f"{title} — {state.upper()}", WHITE, 17, True)
+    s.text(w - 18, 30, f"SOURCE {w}×{h}", MUTED, 12, True, "end")
+    s.rect(inset, 44, w - 2 * inset, h - 88, GREEN, "", .08, "10 7", 2, 8)
+    s.text(w / 2, 68, "32 px slice • native/immersive label zone", GREEN, 11, True, "middle")
+    s.text(w / 2, 108, f"{state.upper()} • FIXED 286×96 DP HIT AREA", CYAN, 12, True, "middle")
+    s.text(w / 2, 136, "IMMERSIVE ART SUPPLIES LABEL", AMBER, 10, True, "middle")
     return s
 
 
@@ -258,6 +352,10 @@ def generate():
         "button-companion-pressed-template": button("COMPANION", "pressed", "264×112 source = 132×56 dp at 2× reference", True),
         "button-settings-normal-template": button("SETTINGS", "normal", "264×112 source = 132×56 dp at 2× reference", True),
         "button-settings-pressed-template": button("SETTINGS", "pressed", "264×112 source = 132×56 dp at 2× reference", True),
+        "button-notes-normal-template": companion_action_button("NOTES", "normal"),
+        "button-notes-pressed-template": companion_action_button("NOTES", "pressed"),
+        "button-walkthrough-normal-template": companion_action_button("WALKTHROUGH", "normal"),
+        "button-walkthrough-pressed-template": companion_action_button("WALKTHROUGH", "pressed"),
         "panel-frame-template": panel_frame(),
     }
     converter = shutil.which("rsvg-convert")

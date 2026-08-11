@@ -106,6 +106,10 @@ internal object SkinSlots {
     const val BUTTON_COMPANION_PRESSED = "button.companion.pressed"
     const val BUTTON_SETTINGS_NORMAL = "button.settings.normal"
     const val BUTTON_SETTINGS_PRESSED = "button.settings.pressed"
+    const val BUTTON_NOTES_NORMAL = "button.notes.normal"
+    const val BUTTON_NOTES_PRESSED = "button.notes.pressed"
+    const val BUTTON_WALKTHROUGH_NORMAL = "button.walkthrough.normal"
+    const val BUTTON_WALKTHROUGH_PRESSED = "button.walkthrough.pressed"
     const val PANEL_FRAME = "panel.frame"
 
     // Runtime-only compatibility for creator kits produced before Milestone 7.0.1.
@@ -122,6 +126,8 @@ internal object SkinSlots {
         BUTTON_RMB_NORMAL, BUTTON_RMB_PRESSED,
         BUTTON_COMPANION_NORMAL, BUTTON_COMPANION_PRESSED,
         BUTTON_SETTINGS_NORMAL, BUTTON_SETTINGS_PRESSED,
+        BUTTON_NOTES_NORMAL, BUTTON_NOTES_PRESSED,
+        BUTTON_WALKTHROUGH_NORMAL, BUTTON_WALKTHROUGH_PRESSED,
     )
 }
 
@@ -130,6 +136,8 @@ internal enum class SkinnableButton {
     RMB,
     COMPANION,
     SETTINGS,
+    NOTES,
+    WALKTHROUGH,
 }
 
 internal fun SkinnableButton.artworkCandidates(pressed: Boolean): Array<String> = when (this) {
@@ -151,6 +159,14 @@ internal fun SkinnableButton.artworkCandidates(pressed: Boolean): Array<String> 
         SkinSlots.BUTTON_SETTINGS_PRESSED,
         SkinSlots.BUTTON_SETTINGS_NORMAL,
     ) else arrayOf(SkinSlots.BUTTON_SETTINGS_NORMAL)
+    SkinnableButton.NOTES -> if (pressed) arrayOf(
+        SkinSlots.BUTTON_NOTES_PRESSED,
+        SkinSlots.BUTTON_NOTES_NORMAL,
+    ) else arrayOf(SkinSlots.BUTTON_NOTES_NORMAL)
+    SkinnableButton.WALKTHROUGH -> if (pressed) arrayOf(
+        SkinSlots.BUTTON_WALKTHROUGH_PRESSED,
+        SkinSlots.BUTTON_WALKTHROUGH_NORMAL,
+    ) else arrayOf(SkinSlots.BUTTON_WALKTHROUGH_NORMAL)
 }
 
 internal fun builtInSkins(): List<InstalledSkin> = listOf(

@@ -156,7 +156,10 @@ internal fun AdventurePadLauncherScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 10.dp),
+                        .padding(
+                            horizontal = AdventurePadDesign.launcherHeaderPadding,
+                            vertical = 10.dp,
+                        ),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -185,103 +188,106 @@ internal fun AdventurePadLauncherScreen(
                 }
 
                 when {
-                state.loading -> LauncherMessage("Loading your collection…")
-                state.error != null -> LauncherMessage(
-                    message = state.error,
-                    action = "Try again",
-                    onAction = onRefresh,
-                )
-                state.targets.isEmpty() -> LauncherMessage(
-                    message = "Your ScummVM library is empty. Add games in ScummVM Advanced Settings, then refresh.",
-                    action = "ScummVM Advanced Settings",
-                    onAction = onOpenAdvancedScummVM,
-                )
-                else -> LazyVerticalGrid(
-                    columns = GridCells.Adaptive(AdventurePadDesign.launcherGameCardWidth),
-                    state = gridState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.launcherGridSpacing),
-                    verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.launcherRowSpacing),
-                ) {
-                    items(visibleTargets, key = { it.targetId }) { target ->
-                        val isDragged = draggedTargetId == target.targetId
-                        GameBox(
-                            target = target,
-                            artworkResolver = artworkResolver,
-                            editingOrder = reorderEnabled,
-                            onBoundsChanged = { cardBounds[target.targetId] = it },
-                            onDisposed = { cardBounds.remove(target.targetId) },
-                            onOpenContextMenu = { bounds ->
-                                openMenu = LauncherMenu.Context(target, bounds)
-                            },
-                            modifier = Modifier
-                                .animateItem()
-                                .zIndex(if (isDragged) 1f else 0f)
-                                .graphicsLayer {
-                                    if (isDragged) {
-                                        translationX = draggedOffset.x
-                                        translationY = draggedOffset.y
+                    state.loading -> LauncherMessage("Loading your collection…")
+                    state.error != null -> LauncherMessage(
+                        message = state.error,
+                        action = "Try again",
+                        onAction = onRefresh,
+                    )
+                    state.targets.isEmpty() -> LauncherMessage(
+                        message = "Your ScummVM library is empty. Add games in ScummVM Advanced Settings, then refresh.",
+                        action = "ScummVM Advanced Settings",
+                        onAction = onOpenAdvancedScummVM,
+                    )
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Adaptive(AdventurePadDesign.launcherGameCardWidth),
+                        state = gridState,
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth()
+                            .padding(
+                                horizontal = AdventurePadDesign.launcherHeaderPadding,
+                                vertical = 2.dp,
+                            ),
+                        horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.launcherGridSpacing),
+                        verticalArrangement = Arrangement.spacedBy(AdventurePadDesign.launcherRowSpacing),
+                    ) {
+                        items(visibleTargets, key = { it.targetId }) { target ->
+                            val isDragged = draggedTargetId == target.targetId
+                            GameBox(
+                                target = target,
+                                artworkResolver = artworkResolver,
+                                editingOrder = reorderEnabled,
+                                onBoundsChanged = { cardBounds[target.targetId] = it },
+                                onDisposed = { cardBounds.remove(target.targetId) },
+                                onOpenContextMenu = { bounds ->
+                                    openMenu = LauncherMenu.Context(target, bounds)
+                                },
+                                modifier = Modifier
+                                    .animateItem()
+                                    .zIndex(if (isDragged) 1f else 0f)
+                                    .graphicsLayer {
+                                        if (isDragged) {
+                                            translationX = draggedOffset.x
+                                            translationY = draggedOffset.y
+                                        }
+                                    },
+                                onClick = { onLaunchTarget(target) },
+                                onDragStart = {
+                                    dragStartOrder = workingManualOrder
+                                    draggedTargetId = target.targetId
+                                    draggedOffset = Offset.Zero
+                                },
+                                onDrag = { amount ->
+                                    draggedOffset += amount
+                                    val slots = gridState.layoutInfo.visibleItemsInfo.associate {
+                                        it.index to Offset(
+                                            it.offset.x + it.size.width / 2f,
+                                            it.offset.y + it.size.height / 2f,
+                                        )
+                                    }
+                                    val currentIndex = workingManualOrder.indexOf(target.targetId)
+                                    val currentCenter = slots[currentIndex]
+                                    val draggedCenter = currentCenter?.plus(draggedOffset)
+                                    val closestIndex = draggedCenter?.let { point ->
+                                        slots.minByOrNull { (_, center) ->
+                                            (point - center).getDistanceSquared()
+                                        }?.key
+                                    }
+                                    val nextIndex = progressiveReorderIndex(
+                                        currentIndex = currentIndex,
+                                        targetIndex = closestIndex ?: currentIndex,
+                                        itemCount = workingManualOrder.size,
+                                    )
+                                    if (nextIndex != currentIndex) {
+                                        val nextCenter = slots[nextIndex]
+                                        workingManualOrder = reorderManualOrderOneStep(
+                                            workingManualOrder,
+                                            target.targetId,
+                                            nextIndex,
+                                        )
+                                        if (currentCenter != null && nextCenter != null) {
+                                            draggedOffset -= nextCenter - currentCenter
+                                        }
                                     }
                                 },
-                            onClick = { onLaunchTarget(target) },
-                            onDragStart = {
-                                dragStartOrder = workingManualOrder
-                                draggedTargetId = target.targetId
-                                draggedOffset = Offset.Zero
-                            },
-                            onDrag = { amount ->
-                                draggedOffset += amount
-                                val slots = gridState.layoutInfo.visibleItemsInfo.associate {
-                                    it.index to Offset(
-                                        it.offset.x + it.size.width / 2f,
-                                        it.offset.y + it.size.height / 2f,
-                                    )
-                                }
-                                val currentIndex = workingManualOrder.indexOf(target.targetId)
-                                val currentCenter = slots[currentIndex]
-                                val draggedCenter = currentCenter?.plus(draggedOffset)
-                                val closestIndex = draggedCenter?.let { point ->
-                                    slots.minByOrNull { (_, center) ->
-                                        (point - center).getDistanceSquared()
-                                    }?.key
-                                }
-                                val nextIndex = progressiveReorderIndex(
-                                    currentIndex = currentIndex,
-                                    targetIndex = closestIndex ?: currentIndex,
-                                    itemCount = workingManualOrder.size,
-                                )
-                                if (nextIndex != currentIndex) {
-                                    val nextCenter = slots[nextIndex]
-                                    workingManualOrder = reorderManualOrderOneStep(
-                                        workingManualOrder,
-                                        target.targetId,
-                                        nextIndex,
-                                    )
-                                    if (currentCenter != null && nextCenter != null) {
-                                        draggedOffset -= nextCenter - currentCenter
+                                onDragFinished = { cancelled ->
+                                    if (draggedTargetId != null) {
+                                        if (cancelled) {
+                                            dragStartOrder?.let { workingManualOrder = it }
+                                        } else {
+                                            onManualOrderChanged(workingManualOrder)
+                                        }
                                     }
-                                }
-                            },
-                            onDragFinished = { cancelled ->
-                                if (draggedTargetId != null) {
-                                    if (cancelled) {
-                                        dragStartOrder?.let { workingManualOrder = it }
-                                    } else {
-                                        onManualOrderChanged(workingManualOrder)
-                                    }
-                                }
-                                dragStartOrder = null
-                                draggedTargetId = null
-                                draggedOffset = Offset.Zero
-                            },
-                        )
+                                    dragStartOrder = null
+                                    draggedTargetId = null
+                                    draggedOffset = Offset.Zero
+                                },
+                            )
+                        }
                     }
                 }
             }
-        }
         }
         openMenu?.let { menu ->
             LauncherMenuLayer(
@@ -482,7 +488,7 @@ private fun LauncherHeader(onSettings: () -> Unit) {
             .statusBarsPadding()
             .padding(
                 start = AdventurePadDesign.launcherHeaderPadding,
-                top = 8.dp,
+                top = AdventurePadDesign.spacingSm,
                 end = AdventurePadDesign.launcherHeaderPadding,
                 bottom = 10.dp,
             ),
@@ -558,91 +564,91 @@ private fun GameBox(
         onDispose(onDisposed)
     }
     Box(modifier = modifier) {
-    Column(
-        modifier = Modifier
-            .testTag("game-card-${target.targetId}")
-            .onGloballyPositioned {
-                bounds = it.boundsInRoot()
-                onBoundsChanged(bounds)
-            }
-            .onFocusChanged { focused = it.isFocused }
-            .pointerInput(target.targetId) {
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent(PointerEventPass.Initial)
-                        when (event.type) {
-                            PointerEventType.Enter -> hovered = true
-                            PointerEventType.Exit -> hovered = false
-                            PointerEventType.Press -> if (event.buttons.isSecondaryPressed) {
-                                onOpenContextMenu(bounds)
-                                event.changes.forEach { it.consume() }
+        Column(
+            modifier = Modifier
+                .testTag("game-card-${target.targetId}")
+                .onGloballyPositioned {
+                    bounds = it.boundsInRoot()
+                    onBoundsChanged(bounds)
+                }
+                .onFocusChanged { focused = it.isFocused }
+                .pointerInput(target.targetId) {
+                    awaitPointerEventScope {
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Initial)
+                            when (event.type) {
+                                PointerEventType.Enter -> hovered = true
+                                PointerEventType.Exit -> hovered = false
+                                PointerEventType.Press -> if (event.buttons.isSecondaryPressed) {
+                                    onOpenContextMenu(bounds)
+                                    event.changes.forEach { it.consume() }
+                                }
+                                else -> Unit
                             }
-                            else -> Unit
                         }
                     }
                 }
-            }
-            .border(
-                width = if (focused) 3.dp else 1.dp,
-                color = if (focused || hovered) palette.launcherAccentDark else palette.launcherInk.copy(alpha = 0.20f),
-                shape = cardShape,
-            )
-            .clip(cardShape)
-            .background(if (focused || hovered || editingOrder) palette.launcherCard else palette.launcherContent)
-            .clickable { if (!editingOrder) onClick() }
-            .then(
-                if (editingOrder) {
-                    Modifier.pointerInput(target.targetId) {
-                        detectDragGestures(
-                            onDragStart = { currentOnDragStart() },
-                            onDragEnd = { currentOnDragFinished(false) },
-                            onDragCancel = { currentOnDragFinished(true) },
-                            onDrag = { change, amount ->
-                                change.consume()
-                                currentOnDrag(amount)
-                            },
-                        )
-                    }
-                } else {
-                    Modifier
-                },
-            )
-            .padding(7.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(AdventurePadDesign.launcherGameBoxAspectRatio)
-                .clip(RoundedCornerShape(4.dp))
-                .background(Color(0xFF241A15)),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (artwork == null) {
-                PlaceholderBoxArt(target)
-            } else {
-                Image(
-                    bitmap = artwork!!,
-                    contentDescription = "${target.title} box artwork",
-                    modifier = Modifier.fillMaxSize(),
-                    contentScale = ContentScale.Fit,
+                .border(
+                    width = if (focused) 3.dp else 1.dp,
+                    color = if (focused || hovered) palette.launcherAccentDark else palette.launcherInk.copy(alpha = 0.20f),
+                    shape = cardShape,
                 )
+                .clip(cardShape)
+                .background(if (focused || hovered || editingOrder) palette.launcherCard else palette.launcherContent)
+                .clickable { if (!editingOrder) onClick() }
+                .then(
+                    if (editingOrder) {
+                        Modifier.pointerInput(target.targetId) {
+                            detectDragGestures(
+                                onDragStart = { currentOnDragStart() },
+                                onDragEnd = { currentOnDragFinished(false) },
+                                onDragCancel = { currentOnDragFinished(true) },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    currentOnDrag(amount)
+                                },
+                            )
+                        }
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(7.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(AdventurePadDesign.launcherGameBoxAspectRatio)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF241A15)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (artwork == null) {
+                    PlaceholderBoxArt(target)
+                } else {
+                    Image(
+                        bitmap = artwork!!,
+                        contentDescription = "${target.title} box artwork",
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Fit,
+                    )
+                }
             }
+            Text(
+                text = target.title,
+                color = palette.launcherInk,
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(40.dp)
+                    .padding(top = 6.dp, start = 3.dp, end = 3.dp),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
-        Text(
-            text = target.title,
-            color = palette.launcherInk,
-            fontWeight = FontWeight.Bold,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp)
-                .padding(top = 6.dp, start = 3.dp, end = 3.dp),
-            style = MaterialTheme.typography.bodyMedium,
-        )
-    }
     }
 }
 
@@ -735,7 +741,7 @@ private fun LauncherMessage(
     ) {
         Text(message, color = palette.launcherInk, textAlign = TextAlign.Center)
         if (action != null) {
-            Button(onClick = onAction, modifier = Modifier.padding(top = 16.dp)) {
+            Button(onClick = onAction, modifier = Modifier.padding(top = AdventurePadDesign.spacingLg)) {
                 Text(action)
             }
         }
