@@ -88,8 +88,10 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with ZipFile(args.output, "w", ZIP_DEFLATED) as archive:
-        readme = pack_readme.read_text(encoding="utf-8").replace(
-            "](../docs/", "](docs/"
+        readme = (
+            pack_readme.read_text(encoding="utf-8")
+            .replace("](../docs/", "](docs/")
+            .replace("](../CREATOR_ASSETS_LICENSE.md)", "](CREATOR_ASSETS_LICENSE.md)")
         )
         archive.writestr(str(ARCHIVE_ROOT / "README.md"), readme)
         add(archive, CREATOR_LICENSE, "CREATOR_ASSETS_LICENSE.md")

@@ -133,6 +133,16 @@ class CreatorPublicationPackTest(unittest.TestCase):
                 self.assertIn(prefix + "docs/CUSTOM_SKINS.md", names)
                 self.assertIn(prefix + "docs/SKIN_REFERENCE.md", names)
                 self.assertTrue(any(name.startswith(prefix + "skin-creator-kit/templates/") for name in names))
+                self.assertEqual(
+                    b"creator-pack-test-psd",
+                    archive.read(prefix + "AdventurePad-Skin-Template.psd"),
+                )
+                readme = archive.read(prefix + "README.md").decode("utf-8")
+                self.assertIn("](CREATOR_ASSETS_LICENSE.md)", readme)
+                forbidden_parts = (".DS_Store", "__MACOSX", "/history/", "-v1")
+                self.assertFalse(any(any(part in name for part in forbidden_parts) for name in names))
+                self.assertFalse(any(name.lower().endswith((".apskin", ".apk")) for name in names))
+                self.assertFalse(any(name.startswith("/") or re.match(r"^[A-Za-z]:", name) for name in names))
 
 
 if __name__ == "__main__":
