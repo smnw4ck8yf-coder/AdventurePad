@@ -55,9 +55,10 @@ internal fun reconcileManualOrder(
     targetIds: List<String>,
 ): List<String> {
     val current = targetIds.filter(String::isNotBlank).distinct()
-    val currentSet = current.toHashSet()
     return buildList {
-        manualOrder.forEach { if (it in currentSet && it !in this) add(it) }
+        // Missing targets may have been intentionally removed from ScummVM and later re-added.
+        // Retain their position as AdventurePad per-game metadata instead of treating absence as cleanup.
+        manualOrder.forEach { if (it.isNotBlank() && it !in this) add(it) }
         current.forEach { if (it !in this) add(it) }
     }
 }

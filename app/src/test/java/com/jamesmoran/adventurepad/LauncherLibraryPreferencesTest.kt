@@ -26,6 +26,17 @@ class LauncherLibraryPreferencesTest {
         assertEquals(listOf("alpha", "monkey", "zork"), sorted.map { it.targetId })
     }
 
+    @Test fun libraryHeaderIsExpandedOnlyAtTheExactTopOfTheExistingGridState() {
+        assertEquals(LauncherHeaderState.EXPANDED, launcherHeaderState(0, 0))
+        assertEquals(LauncherHeaderState.COLLAPSED, launcherHeaderState(0, 1))
+        assertEquals(LauncherHeaderState.COLLAPSED, launcherHeaderState(1, 0))
+    }
+
+    @Test fun primaryCardActionStillLaunchesExceptWhileManualReordering() {
+        assertTrue(shouldLaunchGameFromCard(editingOrder = false))
+        assertFalse(shouldLaunchGameFromCard(editingOrder = true))
+    }
+
     @Test fun recentlyPlayedUsesNewestLaunchFirstAndTitleForNeverPlayedGames() {
         val metadata = LauncherLibraryMetadata(
             lastPlayed = mapOf("alpha" to 100L, "zork" to 300L),
@@ -35,6 +46,20 @@ class LauncherLibraryPreferencesTest {
         val sorted = sortLauncherTargets(games, metadata, LauncherSortMode.RECENTLY_PLAYED)
 
         assertEquals(listOf("zork", "alpha", "monkey"), sorted.map { it.targetId })
+    }
+
+    @Test fun launcherFooterUsesLiveCountAndNewestConfiguredLaunch() {
+        val metadata = LauncherLibraryMetadata(
+            lastPlayed = mapOf("alpha" to 100L, "zork" to 300L, "removed" to 900L),
+            loaded = true,
+        )
+
+        assertEquals("3 Games • Last played: Zork", launcherLibraryStatus(games, metadata))
+    }
+
+    @Test fun launcherFooterHandlesSingularAndMissingHistory() {
+        assertEquals("1 Game", launcherLibraryStatus(games.take(1), LauncherLibraryMetadata()))
+        assertEquals("0 Games", launcherLibraryStatus(emptyList(), LauncherLibraryMetadata()))
     }
 
     @Test fun manualOrderSurvivesSwitchingToAlphabeticalAndBack() {
@@ -91,9 +116,9 @@ class LauncherLibraryPreferencesTest {
         assertEquals(2, progressiveReorderIndex(currentIndex = 2, targetIndex = 2, itemCount = 6))
     }
 
-    @Test fun newGamesAppendAndRemovedGamesArePruned() {
+    @Test fun newGamesAppendAndTemporarilyRemovedGamePositionsArePreserved() {
         assertEquals(
-            listOf("monkey", "alpha", "new-game"),
+            listOf("removed", "monkey", "alpha", "new-game"),
             reconcileManualOrder(
                 manualOrder = listOf("removed", "monkey", "alpha"),
                 targetIds = listOf("alpha", "monkey", "new-game"),

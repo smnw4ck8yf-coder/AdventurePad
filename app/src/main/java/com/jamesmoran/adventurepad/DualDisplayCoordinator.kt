@@ -75,6 +75,32 @@ internal object DualDisplayCoordinator {
         )
     }
 
+    fun restoreGameplayTrackpad(activity: Activity, reason: String): DisplayLaunchResult {
+        val displayManager = activity.getSystemService(DisplayManager::class.java)
+        val secondaryDisplay = findEligibleSecondaryDisplay(displayManager)
+            ?: return DisplayLaunchResult(
+                succeeded = false,
+                message = "ERROR: No eligible physical presentation display was found.",
+            )
+        val trackpadIntent = activityIntent<TrackpadActivity>(activity, reason)
+            .putExtra(EXTRA_SKIN_CONTEXT, SkinContext.GAMEPLAY.name)
+        val permissionError = checkLaunchAllowed(
+            activity = activity,
+            displayId = secondaryDisplay.displayId,
+            intent = trackpadIntent,
+            activityName = "TrackpadActivity",
+        )
+        if (permissionError != null) return permissionError
+
+        return startOnDisplay(
+            activity = activity,
+            intent = trackpadIntent,
+            displayId = secondaryDisplay.displayId,
+            successMessage = "Gameplay TrackpadActivity launched/restored on display " +
+                "${secondaryDisplay.displayId} in its dedicated task.",
+        )
+    }
+
     fun restoreBoth(activity: Activity): DisplayLaunchResult {
         val displayManager = activity.getSystemService(DisplayManager::class.java)
         val secondaryDisplay = findEligibleSecondaryDisplay(displayManager)

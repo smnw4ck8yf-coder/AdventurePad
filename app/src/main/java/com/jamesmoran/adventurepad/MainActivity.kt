@@ -32,10 +32,21 @@ class MainActivity : ComponentActivity() {
         skinRepository = SkinRepository.get(this)
         launcherLibraryMetadataRepository = LauncherLibraryMetadataRepository.create(this, lifecycleScope)
         launcherPointerInput = LauncherPointerInput(this)
-        libraryClient = ScummVMLibraryClient(this) { libraryState = it }
+        libraryClient = ScummVMLibraryClient(
+            context = this,
+            onStateChanged = { libraryState = it },
+            onGameRemovalResult = { result ->
+                if (!result.removed) {
+                    Toast.makeText(
+                        this,
+                        result.error ?: "ScummVM could not remove the configured game.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            },
+        )
 
         setContent {
-            val skinCatalog by skinRepository.catalog.collectAsState()
             val launcherMetadata by launcherLibraryMetadataRepository.metadata.collectAsState()
             LaunchedEffect(
                 libraryState.targets,
@@ -60,6 +71,10 @@ class MainActivity : ComponentActivity() {
                         metadata = launcherMetadata,
                         onRefresh = libraryClient::refresh,
                         onLaunchTarget = ::launchTarget,
+                        onResumeTarget = ::resumeTarget,
+                        onLoadTarget = ::loadTarget,
+                        onAddGame = ::addGame,
+                        onRemoveTarget = ::removeTarget,
                         onOpenAdvancedScummVM = ::openAdvancedScummVM,
                         onManualOrderChanged = { order ->
                             lifecycleScope.launch {
@@ -120,8 +135,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun resumeTarget(target: ScummVMTarget) {
+        val saveSlot = target.resumeSaveSlot
+        if (!target.resumeGameAvailable || saveSlot == null) {
+            Toast.makeText(
+                this,
+                target.resumeUnavailableReason ?: "No resumable save is available.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        if (libraryClient.resume(target.targetId, saveSlot)) {
+            lifecycleScope.launch {
+                launcherLibraryMetadataRepository.recordLaunch(target.targetId)
+            }
+        } else {
+            Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun loadTarget(target: ScummVMTarget) {
+        if (!target.loadGameAvailable) {
+            Toast.makeText(
+                this,
+                "This game does not support loading from the ScummVM launcher.",
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+        if (!libraryClient.openLoadGame(target.targetId)) {
+            Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     private fun openAdvancedScummVM() {
         if (!libraryClient.openAdvancedScummVM()) {
+            Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun addGame() {
+        if (!libraryClient.addGame()) {
+            Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun removeTarget(target: ScummVMTarget) {
+        if (!libraryClient.removeGame(target.targetId)) {
             Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
         }
     }

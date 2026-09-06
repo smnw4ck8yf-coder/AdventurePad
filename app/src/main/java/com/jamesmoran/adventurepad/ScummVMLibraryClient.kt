@@ -19,14 +19,43 @@ internal data class ScummVMTarget(
     val engineId: String,
     val gameId: String,
     val artworkUri: String? = null,
-)
+    val resumeSaveSlot: Int? = null,
+    val resumeUnavailableReason: String? = null,
+    val loadGameAvailable: Boolean = false,
+) {
+    val resumeGameAvailable: Boolean
+        get() = resumeSaveSlot != null && resumeSaveSlot >= 0
+}
 
 internal data class ScummVMLibraryState(
     val connected: Boolean = false,
     val loading: Boolean = true,
     val targets: List<ScummVMTarget> = emptyList(),
+    val saveCapabilitiesReady: Boolean = false,
     val error: String? = null,
 )
+
+internal data class ScummVMGameRemovalResult(
+    val targetId: String,
+    val removed: Boolean,
+    val error: String? = null,
+)
+
+internal class SaveCapabilityRefreshRequestGate {
+    private var requested = false
+
+    fun requestOnce(sendRequest: () -> Boolean): Boolean {
+        if (requested) return false
+        requested = true
+        if (sendRequest()) return true
+        requested = false
+        return false
+    }
+
+    fun reset() {
+        requested = false
+    }
+}
 
 internal fun normalizeScummVMTargets(targets: List<ScummVMTarget>): List<ScummVMTarget> = targets
     .asSequence()
@@ -39,14 +68,27 @@ internal fun normalizeScummVMTargets(targets: List<ScummVMTarget>): List<ScummVM
 internal class ScummVMLibraryClient(
     context: Context,
     private val onStateChanged: (ScummVMLibraryState) -> Unit,
+    private val onGameRemovalResult: (ScummVMGameRemovalResult) -> Unit = {},
 ) {
     private val applicationContext = context.applicationContext
     private var remote: Messenger? = null
     private var bound = false
     private var state = ScummVMLibraryState()
+    private val saveCapabilityRefreshGate = SaveCapabilityRefreshRequestGate()
 
     private val replyMessenger = Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
+            if (message.what == MSG_REMOVE_GAME_RESULT) {
+                val data = message.data
+                onGameRemovalResult(
+                    ScummVMGameRemovalResult(
+                        targetId = data.getString(KEY_TARGET_ID).orEmpty(),
+                        removed = data.getBoolean(KEY_REMOVED, false),
+                        error = data.getString(KEY_ERROR),
+                    ),
+                )
+                return
+            }
             if (message.what != MSG_GAME_LIBRARY) return
             val data = message.data
             data.classLoader = Bundle::class.java.classLoader
@@ -57,6 +99,9 @@ internal class ScummVMLibraryClient(
                         .ifBlank { bundle.getString(KEY_TARGET_ID).orEmpty() },
                     engineId = bundle.getString(KEY_ENGINE_ID).orEmpty(),
                     gameId = bundle.getString(KEY_GAME_ID).orEmpty(),
+                    resumeSaveSlot = bundle.getInt(KEY_RESUME_SAVE_SLOT, -1).takeIf { it >= 0 },
+                    resumeUnavailableReason = bundle.getString(KEY_RESUME_UNAVAILABLE_REASON),
+                    loadGameAvailable = bundle.getBoolean(KEY_LOAD_GAME_AVAILABLE, false),
                 )
             }
             updateState(
@@ -64,6 +109,7 @@ internal class ScummVMLibraryClient(
                     connected = true,
                     loading = false,
                     targets = normalizeScummVMTargets(targets),
+                    saveCapabilitiesReady = data.getBoolean(KEY_SAVE_CAPABILITIES_READY, false),
                     error = data.getString(KEY_ERROR),
                 ),
             )
@@ -75,6 +121,7 @@ internal class ScummVMLibraryClient(
             remote = Messenger(service)
             updateState(state.copy(connected = true, loading = true, error = null))
             refresh()
+            requestSaveCapabilityRefresh()
         }
 
         override fun onServiceDisconnected(name: ComponentName) = disconnect("ScummVM disconnected")
@@ -105,17 +152,41 @@ internal class ScummVMLibraryClient(
         }
         bound = false
         remote = null
+        saveCapabilityRefreshGate.reset()
         updateState(state.copy(connected = false, loading = false))
     }
 
     fun refresh(): Boolean = send(MSG_QUERY_GAME_LIBRARY)
+
+    private fun requestSaveCapabilityRefresh(): Boolean =
+        saveCapabilityRefreshGate.requestOnce { send(MSG_REFRESH_SAVE_CAPABILITIES) }
 
     fun launch(targetId: String): Boolean {
         if (targetId.isBlank()) return false
         return send(MSG_LAUNCH_GAME_TARGET, Bundle().apply { putString(KEY_TARGET_ID, targetId) })
     }
 
+    fun resume(targetId: String, saveSlot: Int): Boolean {
+        if (targetId.isBlank() || saveSlot < 0) return false
+        return send(MSG_RESUME_GAME_TARGET, Bundle().apply {
+            putString(KEY_TARGET_ID, targetId)
+            putInt(KEY_RESUME_SAVE_SLOT, saveSlot)
+        })
+    }
+
+    fun openLoadGame(targetId: String): Boolean {
+        if (targetId.isBlank()) return false
+        return send(MSG_LOAD_GAME_TARGET, Bundle().apply { putString(KEY_TARGET_ID, targetId) })
+    }
+
     fun openAdvancedScummVM(): Boolean = send(MSG_OPEN_SCUMMVM_LIBRARY)
+
+    fun addGame(): Boolean = send(MSG_ADD_GAME)
+
+    fun removeGame(targetId: String): Boolean {
+        if (targetId.isBlank()) return false
+        return send(MSG_REMOVE_GAME_TARGET, Bundle().apply { putString(KEY_TARGET_ID, targetId) })
+    }
 
     private fun send(what: Int, data: Bundle = Bundle.EMPTY): Boolean {
         val recipient = remote ?: return false
@@ -136,6 +207,7 @@ internal class ScummVMLibraryClient(
     private fun disconnect(error: String) {
         remote = null
         bound = false
+        saveCapabilityRefreshGate.reset()
         updateState(state.copy(connected = false, loading = false, error = error))
     }
 
@@ -152,11 +224,22 @@ internal class ScummVMLibraryClient(
         const val MSG_LAUNCH_GAME_TARGET = 201
         const val MSG_OPEN_SCUMMVM_LIBRARY = 202
         const val MSG_GAME_LIBRARY = 203
+        const val MSG_RESUME_GAME_TARGET = 204
+        const val MSG_LOAD_GAME_TARGET = 205
+        const val MSG_REFRESH_SAVE_CAPABILITIES = 206
+        const val MSG_ADD_GAME = 207
+        const val MSG_REMOVE_GAME_TARGET = 208
+        const val MSG_REMOVE_GAME_RESULT = 209
         const val KEY_TARGETS = "targets"
         const val KEY_TARGET_ID = "targetId"
         const val KEY_TITLE = "title"
         const val KEY_ENGINE_ID = "engineId"
         const val KEY_GAME_ID = "gameId"
         const val KEY_ERROR = "error"
+        const val KEY_RESUME_SAVE_SLOT = "resumeSaveSlot"
+        const val KEY_RESUME_UNAVAILABLE_REASON = "resumeUnavailableReason"
+        const val KEY_LOAD_GAME_AVAILABLE = "loadGameAvailable"
+        const val KEY_SAVE_CAPABILITIES_READY = "saveCapabilitiesReady"
+        const val KEY_REMOVED = "removed"
     }
 }
