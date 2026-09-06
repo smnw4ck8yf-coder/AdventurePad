@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Generate the canonical one-PNG authoring documents.
+"""Generate the canonical one-PNG authoring documents from the JSON contract.
 
-This creates the labelled reference sheet and clean creator canvas only. It
+This creates the labelled reference sheet and production template only. It
 does not slice artwork, build .apskin archives, or modify runtime behavior.
 """
 
@@ -44,7 +44,7 @@ COMPANION_ACTION_NINE_SLICE = COMPANION_ACTIONS["horizontalPaddingDp"] * REFEREN
 
 
 REGIONS = [
-    {"slotId": "top.surround", "title": "TOP GAMEPLAY SURROUND", "x": 80, "y": 180, "width": 1920, "height": 1080, "scaleMode": "fill", "alphaMode": "rgba-runtime-clipped", "guide": "top-gameplay-template.svg"},
+    {"slotId": "top.surround", "title": "TOP: SIDE PANELS • CENTRE TRANSPARENT", "x": 80, "y": 180, "width": 1920, "height": 1080, "scaleMode": "fill", "alphaMode": "rgba-gameplay-safe-center", "guide": "top-gameplay-template.svg"},
     {"slotId": "bottom.trackpad.background", "title": "BOTTOM TRACKPAD", "x": 2080, "y": 180, "width": 1240, "height": 1080, "scaleMode": "cover", "alphaMode": "rgba", "guide": "bottom-trackpad-template.svg"},
     {"slotId": "bottom.split.background", "title": "BOTTOM SPLIT VIEW", "x": 3400, "y": 180, "width": 1240, "height": 1080, "scaleMode": "cover", "alphaMode": "rgba", "guide": "bottom-split-template.svg"},
     {"slotId": "companion.background", "title": "COMPANION", "x": 80, "y": 1420, "width": 1240, "height": 1080, "scaleMode": "cover", "alphaMode": "rgba", "guide": "companion-template.svg"},
@@ -255,47 +255,6 @@ def build_reference_svg(regions: list[dict], version: str, output_name: str, cli
     ET.ElementTree(root).write(OUT / output_name, encoding="utf-8", xml_declaration=True)
 
 
-def build_svg() -> None:
-    build_reference_svg(REGIONS, "v1", "AdventurePad-Skin-Template-v1.svg")
-
-
-def build_creator_canvas_svg() -> None:
-    """Build a label-free canvas whose visible marks stay outside every slice."""
-    root = ET.Element(qname("svg"), {
-        "width": str(MASTER_WIDTH), "height": str(MASTER_HEIGHT),
-        "viewBox": f"0 0 {MASTER_WIDTH} {MASTER_HEIGHT}",
-        "version": "1.1", "id": "AdventurePad-Creator-Canvas-v1",
-    })
-    boundaries = ET.SubElement(root, qname("g"), {
-        "id": "BOUNDARIES", "fill": "none", "stroke": "#7c8792",
-        "stroke-opacity": ".32", "stroke-width": "2",
-    })
-    registration = ET.SubElement(root, qname("g"), {
-        "id": "REGISTRATION", "style": "display:none",
-    })
-
-    for index, region in enumerate(REGIONS, 1):
-        # The stroke's inner edge is one full pixel outside the registered
-        # rectangle, so rasterized guide pixels can never enter runtime art.
-        ET.SubElement(boundaries, qname("rect"), {
-            "id": f"boundary-{index:02d}",
-            "x": str(region["x"] - 2), "y": str(region["y"] - 2),
-            "width": str(region["width"] + 4), "height": str(region["height"] + 4),
-        })
-        ET.SubElement(registration, qname("rect"), {
-            "id": f"registration-{index:02d}",
-            "x": str(region["x"]), "y": str(region["y"]),
-            "width": str(region["width"]), "height": str(region["height"]),
-            "fill": "none",
-        })
-
-    ET.ElementTree(root).write(
-        OUT / "AdventurePad-Creator-Canvas-v1.svg",
-        encoding="utf-8",
-        xml_declaration=True,
-    )
-
-
 def load_authoring_spec() -> dict:
     """Load the runtime-bundled crop contract used by the PNG importer."""
     path = OUT / "AUTHORING_TEMPLATE_SPEC.json"
@@ -420,6 +379,22 @@ def build_v2_svg() -> None:
         heading_size = 11 if width < 400 else 17
         heading = f'{region["index"]:02d}  {region_titles.get(slot, slot)}  •  {slot}  •  {width}×{height}'
         text(labels, x, y - 18, heading, heading_size, "#18212a", "700")
+        if slot == "top.surround":
+            # A compact aligned zone map remains in the non-exported gutter,
+            # so even the clean production template communicates the intent.
+            zone_y = y - 52
+            for zone_id, zone_x, zone_width, color in (
+                ("left-panel", x, 240, "#4ddd8b"),
+                ("left-overlap", x + 240, 80, "#ffc857"),
+                ("gameplay-safe-center", x + 320, 1280, "#24d4e8"),
+                ("right-overlap", x + 1600, 80, "#ffc857"),
+                ("right-panel", x + 1680, 240, "#4ddd8b"),
+            ):
+                ET.SubElement(labels, qname("rect"), {
+                    "id": f"top-surround-zone-{zone_id}",
+                    "x": str(zone_x), "y": str(zone_y), "width": str(zone_width), "height": "12",
+                    "fill": color, "fill-opacity": ".72",
+                })
 
         attributes = {
             "id": f"registration-{prefix}", "x": str(x), "y": str(y),
@@ -432,73 +407,26 @@ def build_v2_svg() -> None:
             attributes["data-nine-slice"] = ",".join(
                 str(inset[side]) for side in ("left", "top", "right", "bottom")
             )
+        if "gameplaySafeCenter" in region:
+            safe = region["gameplaySafeCenter"]
+            attributes["data-gameplay-safe-center"] = ",".join(
+                str(safe[key]) for key in ("x", "y", "width", "height")
+            )
         ET.SubElement(registration, qname("rect"), attributes)
 
     ET.ElementTree(root).write(OUT / V2_SVG, encoding="utf-8", xml_declaration=True)
 
 
-def build_spec() -> None:
-    output_regions = []
-    for index, region in enumerate(REGIONS, 1):
-        entry = {
-            "index": index,
-            "slotId": region["slotId"],
-            "svgArtworkGroupId": region["slotId"],
-            "origin": {"x": region["x"], "y": region["y"]},
-            "size": {"width": region["width"], "height": region["height"]},
-            "output": {"width": region["width"], "height": region["height"], "format": "png"},
-            "alphaMode": region["alphaMode"],
-            "scaleMode": region["scaleMode"],
-            "requiredByRuntime": region.get("required", False),
-        }
-        if "nineSliceInsets" in region:
-            entry["nineSliceInsets"] = region["nineSliceInsets"]
-        if region["slotId"] == "top.surround":
-            entry["runtimeProtection"] = "Full artwork is exported; runtime clips the actual live-game viewport. Never author a transparent game-window hole."
-        elif region["slotId"] == "bottom.split.background":
-            entry["runtimeProtection"] = "Full background is exported; the runtime-sized mirrored region is composited above it."
-        elif region["slotId"] == "panel.frame":
-            entry["transparentCenter"] = {"x": 64, "y": 64, "width": 1112, "height": 232, "requiredAlpha": 0}
-        output_regions.append(entry)
-
-    spec = {
-        "schemaVersion": 1,
-        "templateVersion": "2.0.0",
-        "templateFile": V2_PNG,
-        "masterCanvas": {"width": MASTER_WIDTH, "height": MASTER_HEIGHT, "units": "px"},
-        "coordinates": "Master-canvas pixels; origins are top-left; right and bottom are exclusive.",
-        "layerContract": {
-            "GUIDE_BACKGROUNDS": "Non-exporting artboard/reference backdrops placed below artwork for editing visibility.",
-            "ARTWORK": "Editable artist content. One child group per slot ID; Immersive artwork supplies visual labels where the guides require them.",
-            "GUIDES": "Non-exporting geometry, safe/protected/dynamic regions, inset and nine-slice guides.",
-            "LABELS": "Non-exporting dimensions and explanatory/native-label annotations.",
-            "REGISTRATION": "Hidden machine-readable rectangles mirroring JSON registration data."
-        },
-        "sourceAuthority": [
-            "../skin-creator-kit/LAYOUT_SPEC.json",
-            "../skin-creator-kit/LAYOUT_SPEC.md",
-            "../skin-creator-kit/templates/",
-            "../docs/skins/SKIN_FORMAT_V1.md"
-        ],
-        "regions": output_regions,
-        "excludedRuntimeSlots": {
-            "launcher.background": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
-            "launcher.header": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
-            "launcher.brand": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope."
-        },
-        "legacySlotsExcluded": ["bottom.background", "trackpad.button.left", "trackpad.button.right"]
-    }
-    (OUT / "AUTHORING_TEMPLATE_SPEC.json").write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
-
-
 def build_markdown() -> None:
+    spec = load_authoring_spec()
     rows = []
-    for region in REGIONS:
+    for region in sorted(spec["regions"], key=lambda item: item["index"]):
         slice_value = "—"
         if "nineSliceInsets" in region:
             i = region["nineSliceInsets"]
             slice_value = f'{i["left"]}/{i["top"]}/{i["right"]}/{i["bottom"]}'
-        rows.append(f'| `{region["slotId"]}` | {region["x"]},{region["y"]} | {region["width"]}×{region["height"]} | `{region["scaleMode"]}` | `{region["alphaMode"]}` | {slice_value} |')
+        origin, size = region["origin"], region["size"]
+        rows.append(f'| `{region["slotId"]}` | {origin["x"]},{origin["y"]} | {size["width"]}×{size["height"]} | `{region["scaleMode"]}` | `{region["alphaMode"]}` | {slice_value} |')
     document = f"""# AdventurePad canonical skin authoring template v2
 
 This directory documents the artist-facing registration for AdventurePad's single-PNG Skin Builder. It contains two distinct authoring assets:
@@ -506,7 +434,7 @@ This directory documents the artist-facing registration for AdventurePad's singl
 - `AdventurePad-Skin-Template-v2-reference.svg` and `AdventurePad-Skin-Template-v2-reference.png` are the labelled reference/learning template. They explain the regions and authoring constraints; never submit the guide/reference file as a skin.
 - `AdventurePad-Skin-Template-v2.svg` and `AdventurePad-Skin-Template-v2.png` are the canonical production canvas. Visible boundaries and labels sit entirely in non-runtime gutters, leaving every registered region ready to paint.
 
-Start finished artwork from the Creator Canvas, paint every required region, and export one **4720×4040 sRGB PNG**. The creator submits only that final PNG; AdventurePad validates its dimensions, slices every registered region, generates the internal assets and metadata, and installs the selectable skin.
+Start with the production template, paint all 21 regions, and export one **4720×4040 PNG**. sRGB is recommended for predictable colour, but the importer does not enforce a colour profile and DPI is not operationally significant. AdventurePad validates the PNG, slices every registered region, generates its internal assets and metadata, and installs the selectable skin.
 
 Creators do not build `.apskin` archives, manifests, folders, or individual assets. Those are internal AdventurePad implementation details. Guide graphics and labels are reference-only and must be hidden or painted over in the submitted master PNG.
 
@@ -532,7 +460,9 @@ The master canvas is **{MASTER_WIDTH}×{MASTER_HEIGHT} px**. Coordinates use a t
 
 ### Upper display
 
-`top.surround` is only the 1920×1080 upper display, never the physical device, bezel, controls, or hinge. Paint the complete artboard. Do not cut a transparent game-window hole. Runtime clips the skin out of the actual ScummVM viewport, so game pixels always win. The 4:3 and 16:10 rectangles are examples in `GUIDES`; a full-screen 16:9 game can hide the skin completely.
+`top.surround` is only the 1920×1080 upper display, never the physical device, bezel, controls, or hinge. Treat it as two optional full-height decorative side panels, not a four-sided picture frame. Primary side zones are `x=0…240` and `x=1680…1920`; skins may use less than those widths. The adjacent `x=240…320` and `x=1600…1680` bands permit alpha edges, shadows, vines, torn paper, and similar overlap. Keep the large `x=320…1600` gameplay-safe centre transparent across the full height; do not add meaningful top or bottom rails through it.
+
+The Skin Builder actively validates this centre. Alpha values through 32 are ignored and at most 0.5% of centre pixels may exceed that threshold, allowing antialiasing and sparse organic detail while rejecting substantial intrusion. In Normal gameplay, AdventurePad composites the complete authored surround above the game using alpha; it does not always clip artwork away from the live viewport. Edge decoration may therefore overlap the extreme left or right game edges. Split View does not show this decorative surround as the normal upper surround.
 
 ### Lower displays and pages
 
@@ -542,23 +472,25 @@ Split View has no fixed transparent cutout. Export all of `bottom.split.backgrou
 
 ### Buttons and panel frame
 
-Normal and pressed button artwork are separate groups. Standard style draws native labels. Immersive style hides native labels and chrome, so immersive-oriented artwork should visually identify its fixed hit regions. Notes and Walkthrough use their exact 572×192 px reference hit-area geometry. Suggested nine-slice borders are registration metadata and visible guides; avoid essential detail in stretchable centers.
+Normal and pressed button artwork are separate groups. Standard style draws native labels. Immersive style hides native labels and chrome, so immersive-oriented artwork should visually identify its fixed hit regions. A skin intended for Immersive use should provide visible, usable LMB, RMB, Companion, and Settings artwork.
 
-`panel.frame` requires an RGBA image whose inner rectangle `(64,64)` through `(1176,296)` is fully transparent. Runtime draws only the eight border patches and intentionally omits the center patch.
+Nine-slice source sizes are authoring sizes, not fixed physical touch sizes. Corners remain stable, edges stretch along one axis, and the centre stretches or fills where applicable. Runtime layout owns the final visual and touch bounds. Keep icons, labels, and other essential detail away from stretch-sensitive areas. Insets are 96 px for `trackpad.surface`, 64 px for `panel.frame`, 48 px for LMB/RMB, 24 px for Companion/Settings, and 32 px for Notes/Walkthrough.
+
+`panel.frame` is the border around the live lower mirrored panel in Immersive Split View. It requires a 64 px nine-slice inset. During import, AdventurePad clears the inner rectangle `(64,64)` through `(1176,296)` so the frame cannot cover the live mirror. The frame changes the usable inner opening for mirrored content; it is not a Companion overlay.
 
 ### Preview
 
-`preview` is the only required package image. It is a 1200×675 opaque catalog/confirmation image and is never rendered as application UI.
+`preview` must be fully opaque. It is a 1200×675 catalog/confirmation image and is never rendered as application UI. Most other regions support RGBA transparency, and transparent crops can be generated, but Immersive control artwork should remain visible and usable.
 
 ## Scope relative to the runtime skin contract
 
 The authoritative sources agree on the dimensions and behavior of all 21 included regions. `trackpad.surface` remains a separate runtime asset and is therefore included.
 
-The runtime format also recognizes optional `launcher.background`, `launcher.header`, and `launcher.brand` slots. They are intentionally absent from this focused gameplay/lower-screen template. Legacy compatibility slots (`bottom.background`, `trackpad.button.left`, `trackpad.button.right`) are likewise not authoritative creator slots.
+These 21 regions are the complete public master-PNG contract. Internal and legacy package slots are intentionally excluded and are not part of normal community authoring.
 
 ## Skin Builder consumption
 
-`AUTHORING_TEMPLATE_SPEC.json` supplies slot ID, exact master origin, source/output size, alpha mode, scaling, and nine-slice metadata. The current builder reads this registration, validates the submitted master PNG, clips each registered rectangle, enforces `preview` opacity and the `panel.frame` transparent center, then produces and installs the internal package. The checked-in Adventure Journal proof follows this exact path.
+`AUTHORING_TEMPLATE_SPEC.json` supplies slot ID, exact master origin, source/output size, alpha mode, scaling, gameplay-safe-centre policy, and nine-slice metadata. The current builder reads this registration, validates the submitted master PNG, clips each registered rectangle, enforces the `top.surround` gameplay-safe centre and `preview` opacity, preserves the separate `panel.frame` handling, then produces and installs the internal package. The checked-in Adventure Journal proof follows this exact path.
 """
     (OUT / "AUTHORING_TEMPLATE_SPEC.md").write_text(document, encoding="utf-8")
 
@@ -567,11 +499,6 @@ def render_svgs() -> None:
     converter = shutil.which("rsvg-convert")
     if not converter:
         raise SystemExit("rsvg-convert is required to render the reference PNG")
-    subprocess.run([
-        converter,
-        str(OUT / "AdventurePad-Creator-Canvas-v1.svg"),
-        "-o", str(OUT / "AdventurePad-Creator-Canvas-v1.png"),
-    ], check=True)
     subprocess.run([
         converter,
         str(OUT / V2_SVG),
@@ -586,8 +513,6 @@ def render_svgs() -> None:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    build_creator_canvas_svg()
-    build_spec()
     build_markdown()
     build_v2_svg()
     build_v2_reference_svg()

@@ -66,7 +66,7 @@ class SkinAuthoringTemplateV2ReferenceTest(unittest.TestCase):
     def test_reference_contains_every_required_surface_and_button_state(self):
         source = SVG.read_text(encoding="utf-8").upper()
         required_labels = (
-            "TOP GAMEPLAY SURROUND", "BOTTOM TRACKPAD", "BOTTOM SPLIT VIEW",
+            "TOP GAMEPLAY / TOP.SURROUND", "BOTTOM TRACKPAD", "BOTTOM SPLIT VIEW",
             "COMPANION", "NOTES", "WALKTHROUGH", "TRACKPAD SURFACE",
             "PANEL FRAME", "CATALOG PREVIEW", "LMB NORMAL", "LMB PRESSED",
             "RMB NORMAL", "RMB PRESSED", "COMPANION NORMAL", "COMPANION PRESSED",

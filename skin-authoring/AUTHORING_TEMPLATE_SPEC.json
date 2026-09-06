@@ -15,11 +15,10 @@
     "LABELS": "Non-exporting dimensions and explanatory/native-label annotations.",
     "REGISTRATION": "Hidden machine-readable rectangles mirroring JSON registration data."
   },
-  "sourceAuthority": [
-    "../skin-creator-kit/LAYOUT_SPEC.json",
-    "../skin-creator-kit/LAYOUT_SPEC.md",
-    "../skin-creator-kit/templates/",
-    "../docs/skins/SKIN_FORMAT_V1.md"
+  "authority": "Canonical public master-PNG crop and authoring contract; runtime-bundled and consumed by MasterPngSkinBuilder.",
+  "implementationReferences": [
+    "../app/src/main/java/com/jamesmoran/adventurepad/SkinAuthoringSpec.kt",
+    "../app/src/main/java/com/jamesmoran/adventurepad/MasterPngSkinBuilder.kt"
   ],
   "regions": [
     {
@@ -39,10 +38,44 @@
         "height": 1080,
         "format": "png"
       },
-      "alphaMode": "rgba-runtime-clipped",
+      "alphaMode": "rgba-gameplay-safe-center",
       "scaleMode": "fill",
       "requiredByRuntime": false,
-      "runtimeProtection": "Full artwork is exported; runtime clips the actual live-game viewport. Never author a transparent game-window hole."
+      "gameplaySafeCenter": {
+        "x": 320,
+        "y": 0,
+        "width": 1280,
+        "height": 1080,
+        "ignoredAlphaAtOrBelow": 32,
+        "maxNonTransparentFraction": 0.005
+      },
+      "sidePanelGuidance": {
+        "leftPrimary": [
+          0,
+          0,
+          240,
+          1080
+        ],
+        "leftEdgeOverlapAllowance": [
+          240,
+          0,
+          320,
+          1080
+        ],
+        "rightEdgeOverlapAllowance": [
+          1600,
+          0,
+          1680,
+          1080
+        ],
+        "rightPrimary": [
+          1680,
+          0,
+          1920,
+          1080
+        ]
+      },
+      "runtimeBehaviour": "Normal gameplay composites the complete authored PNG above the game using alpha; Split View does not show it as the normal decorative upper surround."
     },
     {
       "index": 2,
@@ -209,7 +242,8 @@
         "width": 1112,
         "height": 232,
         "requiredAlpha": 0
-      }
+      },
+      "runtimeBehaviour": "Frames the live lower mirrored panel in Immersive Split View; importer clears the center and runtime fits mirrored content inside the opening."
     },
     {
       "index": 9,
@@ -558,9 +592,9 @@
     }
   ],
   "excludedRuntimeSlots": {
-    "launcher.background": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
-    "launcher.header": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope.",
-    "launcher.brand": "Optional v1 launcher slot; outside the Milestone 7.2 enumerated master-template scope."
+    "launcher.background": "Internal package slot not available through public master-PNG authoring or external gameplay-skin selection.",
+    "launcher.header": "Internal package slot not available through public master-PNG authoring or external gameplay-skin selection.",
+    "launcher.brand": "Internal package slot not available through public master-PNG authoring or external gameplay-skin selection."
   },
   "legacySlotsExcluded": [
     "bottom.background",

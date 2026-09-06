@@ -1,35 +1,34 @@
-AdventurePad Milestone 7.3 — Rainbow ProofSkin build report
+AdventurePad canonical 21-region Rainbow Proof Skin build report
 
 Source PNG: RainbowProofSkin-source.png
 Source dimensions: 4720x4040 RGBA
-Source SHA-256: 476706860c26e3fd1a637ac0403b7fd9eb12544a181dc1e2c7a2af7b7ead9c46
+Source SHA-256: ab9e012c33a0565587200aa29efc782dccab0a96751ba72d4d2d667f7e6fe62f
 Authoring spec: ../skin-authoring/AUTHORING_TEMPLATE_SPEC.json
-Spec schema/template version: 1 / 1.0.0
-Unique authoritative regions: 17
+Spec schema/template version: 1 / 2.0.0
+Unique authoritative regions: 21
 
 Package: RainbowProofSkin.apskin
-Package SHA-256: 65459bdaead694156f256b318fa259a57e06a24ad2cd49edf7376b9b9cb75c9a
+Package SHA-256: 344b2926220db4f8eb5f5bdeffcd43f80b4871e8ec4b6b51688e025d89c2dccd
 Package identity: org.adventurepad.proof.rainbow
 Package version: 1.0.0
-ZIP entries: 18 (skin.json, preview.png, and 16 other runtime PNGs)
+ZIP entries: 22 (skin.json plus all 21 region images, including preview.png)
 
 Validation results:
 - master dimensions match the JSON masterCanvas
 - region indices and slot IDs are unique
-- every crop and output size is read from the JSON
-- all 17 exported PNGs have their declared output dimensions
+- every crop and output size is read from the canonical JSON
+- all 21 exported PNGs have their declared output dimensions
 - all exported PNGs are RGBA and retain alpha
 - preview is fully opaque
 - panel.frame center x=64, y=64, width=1112, height=232 has alpha 0
 - every exported PNG has a matching SHA-256 entry in skin.json
-- skin.json parses and uses documented scale values, including nineSlice
+- skin.json parses and uses the declared scale/nine-slice values
 - ZIP paths are relative, unique, and package-rooted
 - reference builder validation status: valid
-- AdventurePad manifest/runtime-contract unit validation: pass
-- Android unit suite: pass (226 tests)
 
 The source PNG is generated from the spec regions with flat proof colors only.
 It contains no guide sheet, guide labels, dimensions, annotations, or button text.
+This package is a developer validation artifact, not the public creator workflow.
 
-Physical AYN Thor testing is still required. This report does not claim the
-milestone has passed device acceptance.
+Physical AYN Thor testing is still required. This report does not claim device
+acceptance or replace the current single-PNG creator instructions.

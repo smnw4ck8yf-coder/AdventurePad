@@ -33,16 +33,16 @@ class SkinAuthoringTemplateTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.spec = json.loads((ROOT / "skin-authoring" / "AUTHORING_TEMPLATE_SPEC.json").read_text())
-        cls.canvas_svg = ET.parse(ROOT / "skin-authoring" / "AdventurePad-Creator-Canvas-v1.svg").getroot()
+        cls.canvas_svg = ET.parse(ROOT / "skin-authoring" / "AdventurePad-Skin-Template-v2.svg").getroot()
 
-    def test_creator_canvas_and_reference_are_exact_master_size(self):
+    def test_production_template_and_reference_are_exact_master_size(self):
         expected = (4720, 4040)
-        self.assertEqual(expected, png_size(ROOT / "skin-authoring" / "AdventurePad-Creator-Canvas-v1.png"))
+        self.assertEqual(expected, png_size(ROOT / "skin-authoring" / "AdventurePad-Skin-Template-v2.png"))
         self.assertEqual(expected, png_size(ROOT / "skin-authoring" / "AdventurePad-Skin-Template-v2-reference.png"))
         self.assertEqual("4720", self.canvas_svg.get("width"))
         self.assertEqual("4040", self.canvas_svg.get("height"))
 
-    def test_all_creator_canvas_registrations_match_authoritative_regions(self):
+    def test_all_production_template_registrations_match_authoritative_regions(self):
         authoritative = {
             region["slotId"]: geometry(region)
             for region in generator.REGIONS
@@ -69,11 +69,10 @@ class SkinAuthoringTemplateTest(unittest.TestCase):
                 overlaps = x1 < x2 + width2 and x2 < x1 + width1 and y1 < y2 + height2 and y2 < y1 + height1
                 self.assertFalse(overlaps)
 
-    def test_creator_canvas_has_geometry_only_and_no_visible_text(self):
-        self.assertEqual([], self.canvas_svg.findall(f".//{{{SVG_NS}}}text"))
-        source = (ROOT / "skin-authoring" / "AdventurePad-Creator-Canvas-v1.svg").read_text().lower()
-        for forbidden in ("left", "right", "companion", "settings", "notes", "walkthrough", "guide", "runtime", "native"):
-            self.assertNotIn(forbidden, source)
+    def test_production_template_identifies_all_21_regions(self):
+        source = (ROOT / "skin-authoring" / "AdventurePad-Skin-Template-v2.svg").read_text()
+        for region in self.spec["regions"]:
+            self.assertIn(region["slotId"], source)
 
     def test_visible_boundaries_are_outside_registered_regions(self):
         boundaries = self.canvas_svg.findall(f".//{{{SVG_NS}}}g[@id='BOUNDARIES']/{{{SVG_NS}}}rect")

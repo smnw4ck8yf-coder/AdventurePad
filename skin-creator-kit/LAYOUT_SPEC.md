@@ -1,6 +1,6 @@
 # AdventurePad creator layout contract
 
-`LAYOUT_SPEC.json` is the machine-readable authority. The PNGs in `templates/` are creator guides generated from it and the measured source constants. They represent display pixels only—never the Thor shell, controls, bezel, hinge, or other hardware.
+`LAYOUT_SPEC.json` is a machine-readable responsive-layout reference. Exact master-sheet crop geometry is authoritative only in `../skin-authoring/AUTHORING_TEMPLATE_SPEC.json`. The PNGs in `templates/` are generated creator guides. They represent display pixels only—never the Thor shell, controls, bezel, hinge, or other hardware.
 
 ## Measurement model
 
@@ -10,9 +10,13 @@ The lower PNGs therefore include a visibly labeled reference scenario of 2 px/dp
 
 ## Top gameplay contract
 
-`top.surround` fills the upper display, then `SkinSurroundView` clips out the actual viewport reported by ScummVM. It cannot draw over game pixels. When the ScummVM GUI/overlay is visible, the full display is protected. A 16:9 viewport occupies all 1920×1080 pixels, so no artwork pixel is guaranteed visible. At this reference size, centered 16:10 and 4:3 examples are 1728×1080 at x=96 and 1440×1080 at x=240.
+`top.surround` is authored as two optional full-height decorative side panels, not a conventional four-sided frame. The primary side zones are x=0…240 and x=1680…1920, but artwork may be narrower. The adjoining 80 px bands at x=240…320 and x=1600…1680 permit alpha edges, shadows, vines, torn paper, and similar edge overlap. The full-height centre x=320…1600 is gameplay-safe and must remain transparent; do not build substantial top or bottom rails across it.
 
-Split View can expand the selected upper source crop to a different presentation aspect. The reported protected rectangle changes with it; creators must never encode a fixed decorative inner frame.
+The single-master-PNG importer actively validates this area. Alpha values through 32 are ignored and up to 0.5% of the central pixels may exceed that threshold. This deliberately tolerates antialiasing and sparse organic detail while rejecting clear opaque intrusion.
+
+In Normal gameplay, `top.surround` fills the upper display and the complete RGBA bitmap is composited above the game. Runtime does not always clip the artwork away from the live viewport, so decoration may overlap the extreme left/right game edges. The authoring-safe centre is what keeps normal gameplay visually unobstructed.
+
+Split View does not show this decorative artwork as the normal upper surround. Creators should never encode a fixed decorative inner frame.
 
 ## Lower gameplay contract
 
@@ -38,7 +42,7 @@ In Standard they are centered native overlays occupying 94% of safe-drawing widt
 
 Decorative styling must preserve Notes/Walkthrough native text, editor behavior, reader controls, focus semantics, reader palettes, and search-highlight contrast.
 
-## Button and state contract
+## Button, state, and nine-slice contract
 
 LMB and RMB declare 528×224 source canvases and use nine-slice rendering with 48 px suggested insets. Companion and Settings use 264×112 source canvases with 24 px suggested insets. Each has `.normal` and `.pressed` slots. Existing pointer/Compose press state selects only the image; behavior, minimum hit targets, native labels, ripple/overlay, and accessibility are unchanged. Missing pressed art falls back to matching normal art.
 
@@ -46,8 +50,16 @@ Companion and Settings remain native Compose controls with minimum 132×56 dp to
 
 Standard style remains authoritative for visible native text. Immersive-oriented artwork should include the visual labels identified by the guides because native labels and chrome are hidden there. Compose remains authoritative for semantics, accessibility, localization metadata, and interaction.
 
+Source PNG dimensions are authoring dimensions, not fixed runtime device-space or touch sizes. Nine-slice rendering keeps corners stable, stretches edges along one axis, and stretches/fills the centre where applicable. Final visual and touch bounds come from the responsive runtime layout. Keep important icons, text, and detail outside stretch-sensitive areas.
+
+- `trackpad.surface`: 96 px insets.
+- `panel.frame`: 64 px insets.
+- LMB/RMB: 48 px insets.
+- Companion/Settings: 24 px insets.
+- Notes/Walkthrough: 32 px insets.
+
 ## `panel.frame`
 
-`panel.frame` must be nine-slice. It is drawn around Companion-family pages as eight border patches; the center patch is deliberately omitted so it cannot cover native content. The frame is visual and non-interactive. It is no longer used over live Split View content.
+`panel.frame` is a 1240×360 nine-slice frame used around the live lower mirrored panel in Immersive Split View. Its 64 px insets define an inner opening. AdventurePad clears the centre during import, and the runtime fits live mirrored content inside that opening so artwork cannot cover it. The frame is visual and non-interactive; it is not a Companion overlay.
 
 No existing screen structure or input behavior is changed by this contract.

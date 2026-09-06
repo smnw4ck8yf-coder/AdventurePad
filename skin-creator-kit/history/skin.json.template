@@ -1,4 +1,5 @@
 {
+  "_historicalNotice": "OBSOLETE: retained for package-format history; do not use for the current 21-region single-PNG creator workflow",
   "formatVersion": 1,
   "id": "org.example.replace-me",
   "name": "Replace Me",

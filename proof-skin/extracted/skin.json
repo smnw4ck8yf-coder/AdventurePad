@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "id": "org.adventurepad.proof.rainbow",
   "name": "AdventurePad Rainbow Proof",
-  "author": "AdventurePad Development",
+  "author": "AdventurePad",
   "packageVersion": "1.0.0",
   "minimumAdventurePadVersionCode": 1,
   "features": [

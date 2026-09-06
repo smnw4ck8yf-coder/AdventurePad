@@ -65,6 +65,38 @@ class SkinAuthoringTemplateV2Test(unittest.TestCase):
         }
         self.assertTrue(expected.issubset(slots))
 
+    def test_top_surround_visually_maps_side_overlap_and_safe_center_zones(self):
+        top = next(region for region in self.spec["regions"] if region["slotId"] == "top.surround")
+        self.assertEqual(
+            {
+                "x": 320, "y": 0, "width": 1280, "height": 1080,
+                "ignoredAlphaAtOrBelow": 32, "maxNonTransparentFraction": 0.005,
+            },
+            top["gameplaySafeCenter"],
+        )
+        labels = self.svg.find(f".//{{{SVG_NS}}}g[@id='LABELS']")
+        self.assertIsNotNone(labels)
+        zones = {
+            element.get("id"): tuple(int(element.get(key)) for key in ("x", "width"))
+            for element in labels.findall(f"{{{SVG_NS}}}rect")
+            if element.get("id", "").startswith("top-surround-zone-")
+        }
+        self.assertEqual(
+            {
+                "top-surround-zone-left-panel": (80, 240),
+                "top-surround-zone-left-overlap": (320, 80),
+                "top-surround-zone-gameplay-safe-center": (400, 1280),
+                "top-surround-zone-right-overlap": (1680, 80),
+                "top-surround-zone-right-panel": (1760, 240),
+            },
+            zones,
+        )
+        registration = self.svg.find(
+            f".//{{{SVG_NS}}}rect[@data-slot-id='top.surround']"
+            f"[@data-gameplay-safe-center='320,0,1280,1080']"
+        )
+        self.assertIsNotNone(registration)
+
     def test_v2_registers_exactly_21_regions_and_companion_action_geometry(self):
         regions = {region["slotId"]: region for region in self.spec["regions"]}
         self.assertEqual(21, len(regions))

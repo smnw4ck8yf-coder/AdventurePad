@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "authority": "AdventurePad source at Milestone 7.0.1; runtime formulas override the illustrative reference scenario",
+  "authority": "Derived artist-layout reference for the current runtime; skin-authoring/AUTHORING_TEMPLATE_SPEC.json is authoritative for master-canvas crop geometry",
   "coordinateConventions": {
     "rect": "[left, top, right, bottom], right/bottom exclusive",
     "displayPixels": "physical display canvas pixels",
@@ -17,15 +17,28 @@
       "canvasPx": [1920, 1080],
       "slot": "top.surround",
       "scale": "fill",
-      "requiredTransparency": "runtime game viewport; runtime enforces this with clipOutRect",
-      "guaranteedArtworkSafeRect": null,
+      "requiredTransparency": "full-height gameplay-safe center [320,0,1600,1080], with tolerant alpha validation for new master-PNG builds",
+      "primarySidePanelsPx": {
+        "left": [0, 0, 240, 1080],
+        "right": [1680, 0, 1920, 1080]
+      },
+      "edgeOverlapAllowancePx": {
+        "left": [240, 0, 320, 1080],
+        "right": [1600, 0, 1680, 1080]
+      },
+      "gameplaySafeCenterPx": [320, 0, 1600, 1080],
+      "gameplaySafeCenterValidation": {
+        "ignoredAlphaAtOrBelow": 32,
+        "maxNonTransparentFraction": 0.005,
+        "appliesTo": "new single-master-PNG builds only"
+      },
       "viewportExamplesPx": {
         "16:9": [0, 0, 1920, 1080],
         "16:10": [96, 0, 1824, 1080],
         "4:3": [240, 0, 1680, 1080]
       },
-      "runtimeRule": "bitmap fills SkinSurroundView; clipOutRect(actual ScummVM presentation viewport); GUI/overlay protects the full display",
-      "splitViewRule": "expanded upper crop can change the presentation aspect and therefore the protected viewport"
+      "runtimeRule": "Normal gameplay composites the complete authored bitmap above the game using alpha; artwork may overlap extreme left/right game edges",
+      "splitViewRule": "the decorative top surround is not shown as the normal upper surround in Split View"
     },
     "bottomTrackpad": {
       "canvasPx": [1240, 1080],
@@ -82,6 +95,13 @@
       "splitRatio": {"minimum": 0.05, "default": 0.75, "maximum": 0.95, "snapping": "nearest source pixel"},
       "example": {"sourceAspect": "4:3", "splitRatio": 0.75, "interfaceHeightPx": 314},
       "trackpad": "weighted remaining region; same padding, L/R formulas and utility bar as bottomTrackpad",
+      "immersivePanelFrame": {
+        "slot": "panel.frame",
+        "sourceCanvasPx": [1240, 360],
+        "nineSlicePx": [64, 64, 64, 64],
+        "transparentCenterPx": [64, 64, 1176, 296],
+        "runtimeRule": "frames the live lower mirror; importer clears the center and runtime fits mirrored content inside the opening"
+      },
       "fixedArtworkSafeRects": [],
       "clippingContract": "background renders below the runtime-sized mirror; no fixed source cutout is used and mirror pixels cannot be obscured"
     },
@@ -161,7 +181,7 @@
     "panel.frame": [64, 64, 64, 64]
   },
   "runtimeScaling": {
-    "top.surround": "FillBounds in Android View, with runtime viewport clipped out",
+    "top.surround": "FillBounds in Android View; Normal gameplay composites the complete RGBA bitmap above the game",
     "bottom.trackpad.background": "Compose cover/crop beneath normal gameplay",
     "bottom.split.background": "Compose cover/crop beneath dynamic live mirror",
     "companion.background": "Compose cover/crop; full immersive Companion page or beneath 94% Standard page",
@@ -169,6 +189,6 @@
     "walkthrough.background": "Compose cover/crop; full immersive Walkthrough page or beneath 94% Standard page",
     "trackpad.surface": "Compose nine-slice FillBounds",
     "statefulButtons": "Compose nine-slice FillBounds; artwork state follows existing press state and does not own input",
-    "panel.frame": "nine-slice border patches only; center patch intentionally omitted"
+    "panel.frame": "64 px nine-slice frame around the live lower mirror in Immersive Split View; importer clears the center and runtime fits mirrored content inside the opening"
   }
 }

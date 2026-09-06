@@ -1,6 +1,8 @@
-# AdventurePad Skin Package Format v1
+# AdventurePad Skin Package Format v1 — internal/advanced
 
-An `.apskin` file is a ZIP archive containing declarative artwork and a `skin.json` manifest. It cannot contain application behavior. AdventurePad keeps gestures, layout, accessibility, labels, state, input, and game rendering native.
+> This is an internal package-format reference for AdventurePad maintainers. Community artists should use the [single-PNG creator workflow](../../skin-creator-kit/README.md): export one 4720×4040 PNG and let AdventurePad build and install the package. The current user interface does not offer direct `.apskin` selection.
+
+Internally, an `.apskin` file is a ZIP archive containing declarative artwork and a `skin.json` manifest. It cannot contain application behavior. AdventurePad keeps gestures, layout, accessibility, labels, state, input, and game rendering native.
 
 ## Context selection
 
@@ -18,18 +20,16 @@ Assignments store stable skin IDs, not installation paths. Removing a community 
 ```text
 skin.json                 required
 preview.png               required; catalog/confirmation only
-assets/                   optional rendering artwork
-  launcher/
+assets/                   optional PNG/WebP rendering artwork
   top/
   bottom/
   trackpad/
   panels/
   buttons/
   icons/
-fonts/                    reserved for a future compatible version
 ```
 
-Paths are case-sensitive POSIX relative paths. Absolute paths, `..`, empty components, backslashes, duplicates, case collisions, nested archives, executables, scripts, encrypted entries, and files outside the package root are rejected.
+Paths are case-sensitive POSIX relative paths. Absolute paths, `..`, empty components, backslashes, duplicates, case collisions, nested archives, executables, scripts, encrypted entries, fonts, and files outside the package root are rejected. Apart from root `skin.json` and `preview.png`, accepted package files must be PNG/WebP images under `assets/`.
 
 Limits are 64 MiB packaged, 128 MiB expanded, 256 entries, 32 MiB per entry, and 8192×8192 per decoded image. Every manifest-referenced asset has a SHA-256 digest. Import extracts to private staging, validates the complete package, and promotes it atomically.
 
@@ -90,10 +90,10 @@ Scaling modes are `cover`, `contain`, `fill`, `nineSlice`, and `none`. `nineSlic
 | Slot | Required | Reference canvas | Alpha | Runtime contract |
 |---|---|---:|---|---|
 | `preview` | Yes | 1200×675 | No | Contain; never rendered as UI |
-| `launcher.background` | No | 1920×1080 | Yes | Cover; launcher context only |
-| `launcher.header` | No | 1920×256 | Yes | Decorative; native header remains |
-| `launcher.brand` | No | 1024×256 | Yes | Contain |
-| `top.surround` | No | 1920×1080 | Yes | Fill display, then clip out the native live-game rectangle |
+| `launcher.background` | No | 1920×1080 | Yes | Recognized internal slot; external gameplay skins cannot currently select it for the fixed launcher |
+| `launcher.header` | No | 1920×256 | Yes | Recognized internal slot; no current external-skin launcher consumer |
+| `launcher.brand` | No | 1024×256 | Yes | Recognized internal slot; no current external-skin launcher consumer |
+| `top.surround` | No | 1920×1080 | Yes | Normal gameplay composites the complete RGBA bitmap above the game; Split View does not show it as the normal decorative surround |
 | `bottom.trackpad.background` | No | 1240×1080 | Yes | Cover beneath normal lower gameplay UI |
 | `bottom.split.background` | No | 1240×1080 | Yes | Cover beneath Split View; runtime mirror always draws above it |
 | `companion.background` | No | 1240×1080 | Yes | Cover full lower display beneath current Companion page |
@@ -104,12 +104,16 @@ Scaling modes are `cover`, `contain`, `fill`, `nineSlice`, and `none`. `nineSlic
 | `button.rmb.normal`, `button.rmb.pressed` | No | 528×224 | Yes | Nine-slice; native RMB touch region and label remain |
 | `button.companion.normal`, `button.companion.pressed` | No | 264×112 | Yes | Nine-slice; native 132×56 dp-min button owns input/label |
 | `button.settings.normal`, `button.settings.pressed` | No | 264×112 | Yes | Nine-slice; native 132×56 dp-min button owns input/label |
-| `panel.frame` | No | 1240×360 | Yes | Nine-slice border around Companion-family pages; center patch is never drawn |
+| `button.notes.normal`, `button.notes.pressed` | No | 572×192 | Yes | Nine-slice; native Companion Notes action owns input/semantics |
+| `button.walkthrough.normal`, `button.walkthrough.pressed` | No | 572×192 | Yes | Nine-slice; native Companion Walkthrough action owns input/semantics |
+| `panel.frame` | No | 1240×360 | Yes | 64 px nine-slice frame around the live lower mirror in Immersive Split View; importer clears the center |
 
-The reference canvases match the current AYN Thor displays, not fixed runtime dimensions. Artwork must tolerate cropping and different aspect ratios. There is no guaranteed visible safe area in `top.surround`: a 16:9 game can hide it completely. AdventurePad/ScummVM clips the artwork outside the native viewport, and missing provider data leaves the existing black surround.
+The reference canvases match the current AYN Thor displays, not fixed runtime control/touch dimensions. In Normal gameplay the complete `top.surround` bitmap is composited above the game using alpha. The public master-PNG importer therefore validates a transparent full-height centre at `x=320…1600`: alpha values through 32 are ignored and no more than 0.5% of centre pixels may exceed that threshold. Side decoration may overlap extreme game edges. Avoid meaningful top/bottom rails through the centre. Split View does not show the decorative bitmap as the normal upper surround.
+
+Nine-slice authoring sizes are not physical touch sizes. Corners remain stable, edges stretch along one axis, and centres stretch/fill where applicable. Insets are 96 px for `trackpad.surface`, 64 px for `panel.frame`, 48 px for LMB/RMB, 24 px for Companion/Settings, and 32 px for Notes/Walkthrough. Runtime layout remains authoritative for visual and touch bounds.
 
 Pressed artwork changes visuals only. Missing pressed art falls back to the matching normal image; missing normal art falls back to legacy v1 artwork where applicable, then native rendering. Legacy `bottom.background`, `trackpad.button.left`, and `trackpad.button.right` packages remain renderable but are not authoritative creator slots.
 
 Hover, focused, and disabled artwork states are reserved for a future format-compatible extension and are not required in v1.
 
-Fonts, custom cursors, animations, sounds, remote assets, and executable behavior are not implemented in v1.
+Fonts, custom cursors, animations, sounds, remote assets, and executable behavior are not implemented or accepted in v1 packages.

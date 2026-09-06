@@ -94,24 +94,28 @@ class Svg:
 
 
 def top():
-    s = Svg(1920, 1080, "TOP GAMEPLAY / top.surround", "Exact display canvas 1920×1080 px — every actual runtime game viewport is protected")
-    s.pattern_rect(0, 0, 1920, 1080, "danger", RED)
-    s.rect(96, 0, 1728, 1080, AMBER, "", .05, "24 14", 6)
-    s.rect(240, 0, 1440, 1080, CYAN, "", .06, "24 14", 6)
-    s.rect(0, 0, 96, 1080, GREEN, "", .13)
-    s.rect(1824, 0, 96, 1080, GREEN, "", .13)
-    s.note(640, 150, [
-        "RUNTIME CONTRACT",
-        "Bitmap fills the display, then SkinSurroundView clipOutRect(viewport).",
-        "No pixel is guaranteed artwork-visible: full-screen 16:9 hides all art.",
-        "4:3 leaves 240 px per side; 16:10 leaves 96 px per side on this canvas.",
-        "ScummVM GUI/overlay reports full display protected (no surround).",
-        "Split View may expand the upper crop and changes the protected rectangle.",
-    ], 900)
-    s.text(270, 930, "CYAN 4:3 protected edge", CYAN, 19, True)
-    s.text(110, 965, "AMBER 16:10 protected edge", AMBER, 19, True)
-    s.text(960, 930, "RED HATCH = 16:9 full-screen protected viewport", RED, 22, True, "middle")
-    s.text(120, 1010, "Potential surround only; never place required information here", GREEN, 22, True)
+    s = Svg(1920, 1080, "TOP GAMEPLAY / top.surround", "Two full-height side panels • keep the large central gameplay area transparent")
+    s.rect(0, 0, 240, 1080, GREEN, "", .16, stroke=5)
+    s.rect(1680, 0, 240, 1080, GREEN, "", .16, stroke=5)
+    s.rect(240, 0, 80, 1080, AMBER, "", .12, "16 10", 4)
+    s.rect(1600, 0, 80, 1080, AMBER, "", .12, "16 10", 4)
+    s.pattern_rect(320, 0, 1280, 1080, "danger", RED)
+    s.text(120, 132, "LEFT PANEL", GREEN, 18, True, "middle")
+    s.text(960, 132, "CENTRAL GAMEPLAY-SAFE AREA — KEEP TRANSPARENT", RED, 20, True, "middle")
+    s.text(1800, 132, "RIGHT PANEL", GREEN, 18, True, "middle")
+    s.note(610, 155, [
+        "AUTHORING CONTRACT",
+        "Decorate primarily in the green left/right panels; either may be narrower.",
+        "Amber 80 px bands allow alpha edges, shadows, vines, and torn-paper overlap.",
+        "Keep x=320…1600 transparent for the full height; no top/bottom centre rails.",
+        "Low alpha (≤32) is ignored; up to 0.5% stronger centre pixels are tolerated.",
+        "Normal mode composites the complete PNG above the game using authored alpha.",
+        "Split View does not show this decorative surround as the normal top surround.",
+    ], 700)
+    s.text(280, 930, "80 px EDGE OVERLAP", AMBER, 18, True, "middle")
+    s.text(1640, 930, "80 px EDGE OVERLAP", AMBER, 18, True, "middle")
+    s.text(960, 970, "NOT A FOUR-SIDED FRAME", RED, 24, True, "middle")
+    s.text(960, 1005, "Small corner transitions are fine • substantial top/bottom rails are not", WHITE, 18, True, "middle")
     s.legend(1050)
     return s
 
@@ -324,14 +328,14 @@ def companion_action_button(title, state):
 
 
 def panel_frame():
-    s = Svg(1240, 360, "PANEL FRAME / panel.frame", "Nine-slice source 1240×360 — runtime draws border patches only around Companion-family pages")
-    s.rect(64, 64, 1112, 232, RED, "CENTER PATCH OMITTED BY RUNTIME — native content remains visible", .05, "18 12", 4)
+    s = Svg(1240, 360, "PANEL FRAME / panel.frame", "64 px nine-slice border around the live lower mirror in Immersive Split View")
+    s.rect(64, 64, 1112, 232, RED, "CENTER CLEARED DURING IMPORT — live mirrored content remains visible", .05, "18 12", 4)
     s.rect(0, 0, 1240, 360, GREEN, "", .035, "", 5)
     s.line(64, 0, 64, 360, AMBER, 3, "10 8")
     s.line(1176, 0, 1176, 360, AMBER, 3, "10 8")
     s.line(0, 64, 1240, 64, AMBER, 3, "10 8")
     s.line(0, 296, 1240, 296, AMBER, 3, "10 8")
-    s.text(620, 190, "KEEP CENTER TRANSPARENT • ARTWORK IS NON-INTERACTIVE", RED, 22, True, "middle")
+    s.text(620, 190, "IMPORTER CLEARS CENTER • ARTWORK IS NON-INTERACTIVE", RED, 22, True, "middle")
     s.text(620, 338, "GREEN OUTER BAND / AMBER GUIDES = 64 px SUGGESTED NINE-SLICE BORDER", GREEN, 17, True, "middle")
     return s
 
