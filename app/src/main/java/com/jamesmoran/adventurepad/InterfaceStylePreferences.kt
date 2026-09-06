@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 
@@ -28,9 +29,12 @@ internal enum class InterfaceStyle(val displayName: String) {
 }
 
 internal interface InterfaceStylePreferencesStore {
+    /** Legacy global preference retained as a migration fallback. */
     val interfaceStyleId: Flow<String?>
 
-    suspend fun setInterfaceStyleId(interfaceStyleId: String)
+    fun interfaceStyleId(targetId: String): Flow<String?>
+
+    suspend fun setInterfaceStyleId(targetId: String, interfaceStyleId: String)
 }
 
 internal class DataStoreInterfaceStylePreferencesStore(
@@ -42,12 +46,24 @@ internal class DataStoreInterfaceStylePreferencesStore(
         }
         .map { preferences -> preferences[InterfaceStyleIdKey] }
 
-    override suspend fun setInterfaceStyleId(interfaceStyleId: String) {
-        dataStore.edit { preferences -> preferences[InterfaceStyleIdKey] = interfaceStyleId }
+    override fun interfaceStyleId(targetId: String): Flow<String?> = dataStore.data
+        .catch { exception ->
+            if (exception is IOException) emit(emptyPreferences()) else throw exception
+        }
+        .map { preferences -> preferences[gameInterfaceStyleKey(targetId)] }
+
+    override suspend fun setInterfaceStyleId(targetId: String, interfaceStyleId: String) {
+        dataStore.edit { preferences ->
+            preferences[gameInterfaceStyleKey(targetId)] = interfaceStyleId
+        }
     }
 
     private companion object {
         val InterfaceStyleIdKey = stringPreferencesKey("interface_style")
+        private const val GameInterfaceStylePrefix = "interface_style.game."
+
+        fun gameInterfaceStyleKey(targetId: String) =
+            stringPreferencesKey(GameInterfaceStylePrefix + targetId.trim())
     }
 }
 
@@ -63,8 +79,27 @@ internal class InterfaceStylePreferencesRepository(
             initialValue = InterfaceStyle.STANDARD,
         )
 
-    suspend fun selectStyle(style: InterfaceStyle) {
-        store.setInterfaceStyleId(style.name.lowercase())
+    /**
+     * Returns the requested presentation for one game. Existing global preferences are used only
+     * when that game has no explicit choice; a genuinely new game defaults to Immersive once a
+     * capable skin is applied. The effective style is resolved separately from SkinContext.
+     */
+    fun requestedStyle(targetId: String): Flow<InterfaceStyle> {
+        val normalizedTargetId = targetId.trim()
+        if (normalizedTargetId.isEmpty()) return activeStyle
+        return combine(
+            store.interfaceStyleId(normalizedTargetId),
+            store.interfaceStyleId,
+        ) { gameStyleId, legacyGlobalStyleId ->
+            gameStyleId?.let(InterfaceStyle::fromId)
+                ?: legacyGlobalStyleId?.let(InterfaceStyle::fromId)
+                ?: InterfaceStyle.IMMERSIVE
+        }
+    }
+
+    suspend fun selectStyle(targetId: String, style: InterfaceStyle) {
+        require(targetId.isNotBlank())
+        store.setInterfaceStyleId(targetId.trim(), style.name.lowercase())
     }
 
     companion object {

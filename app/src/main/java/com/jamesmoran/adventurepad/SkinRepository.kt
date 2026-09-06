@@ -31,21 +31,22 @@ internal class SkinRepository private constructor(private val context: Context) 
             context = skinContext,
             targetId = targetId,
             gameplayAssignments = gameplayAssignments(),
-            launcherSkinId = preferences.getString(KEY_LAUNCHER_SKIN, BUILTIN_ADVENTURE_SKIN_ID)
-                ?: BUILTIN_ADVENTURE_SKIN_ID,
         )
-        val effectiveId = if (
+        val usesColourThemeFallback =
             skinContext == SkinContext.GAMEPLAY &&
             id == BUILTIN_DEFAULT_SKIN_ID &&
             assignedGameplaySkinId(targetId.orEmpty()) == null
-        ) {
+        val effectiveId = if (usesColourThemeFallback) {
             builtInSkinIdForTheme(defaultGameplayTheme)
         } else {
             id
         }
         val skin = _catalog.value.firstOrNull { it.manifest.id == effectiveId }
             ?: _catalog.value.first { it.manifest.id == BUILTIN_DEFAULT_SKIN_ID }
-        return ResolvedSkin(skin, skin.toTheme())
+        return ResolvedSkin(
+            skin = skin,
+            theme = if (usesColourThemeFallback) defaultGameplayTheme else skin.toTheme(),
+        )
     }
 
     fun assignedGameplaySkinId(targetId: String): String? =
@@ -171,7 +172,6 @@ internal class SkinRepository private constructor(private val context: Context) 
 
     companion object {
         private const val PREFERENCES_NAME = "adventurepad_skins_v1"
-        private const val KEY_LAUNCHER_SKIN = "launcher_skin_id"
         private const val KEY_GAMEPLAY_PREFIX = "gameplay_skin."
         private const val TAG = "AdventurePadSkins"
 

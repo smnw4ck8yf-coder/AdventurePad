@@ -27,7 +27,45 @@ class SkinColourThemeIndependenceTest {
 
         assertSame(
             AdventurePadThemes.Adventure,
-            nativeThemeForGameSkin(AdventurePadThemes.Adventure, resolvedSkin),
+            nativeThemeForSkinContext(
+                SkinContext.GAMEPLAY,
+                AdventurePadThemes.Adventure,
+                resolvedSkin,
+            ),
+        )
+    }
+
+    @Test
+    fun launcherResolvedSkinOwnsItsNativeTheme() {
+        val launcherSkin = ResolvedSkin(
+            builtInSkins().single { it.manifest.id == BUILTIN_ADVENTURE_SKIN_ID },
+            AdventurePadThemes.Launcher,
+        )
+
+        assertSame(
+            AdventurePadThemes.Launcher,
+            nativeThemeForSkinContext(
+                SkinContext.LAUNCHER,
+                AdventurePadThemes.Default,
+                launcherSkin,
+            ),
+        )
+    }
+
+    @Test
+    fun unskinnedGameplayDoesNotUseLauncherNativeTheme() {
+        val defaultSkin = ResolvedSkin(
+            builtInSkins().single { it.manifest.id == BUILTIN_DEFAULT_SKIN_ID },
+            AdventurePadThemes.Default,
+        )
+
+        assertSame(
+            AdventurePadThemes.Adventure,
+            nativeThemeForSkinContext(
+                SkinContext.GAMEPLAY,
+                AdventurePadThemes.Adventure,
+                defaultSkin,
+            ),
         )
     }
 }

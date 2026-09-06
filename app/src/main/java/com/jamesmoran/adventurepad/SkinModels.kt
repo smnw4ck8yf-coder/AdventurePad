@@ -78,13 +78,29 @@ internal data class ResolvedSkin(
     fun resolveAssetSlot(vararg candidates: String): String? = candidates.firstOrNull { slot ->
         skin.manifest.assets.containsKey(slot) && assetFile(slot) != null
     }
+
+    fun assetAspectRatio(vararg candidates: String): Float? {
+        val slot = resolveAssetSlot(*candidates) ?: return null
+        val canvas = skin.manifest.assets.getValue(slot).canvas ?: return null
+        return if (canvas.width > 0 && canvas.height > 0) {
+            canvas.width.toFloat() / canvas.height
+        } else {
+            null
+        }
+    }
 }
 
-/** Game skins supply artwork; the selected colour theme remains authoritative for native UI. */
-internal fun nativeThemeForGameSkin(
+/** Launcher owns its native palette; gameplay skins supply artwork around the selected colour theme. */
+internal fun nativeThemeForSkinContext(
+    context: SkinContext,
     selectedColourTheme: AdventurePadThemeDefinition,
-    @Suppress("UNUSED_PARAMETER") selectedGameSkin: ResolvedSkin,
-): AdventurePadThemeDefinition = selectedColourTheme
+    resolvedSkin: ResolvedSkin,
+): AdventurePadThemeDefinition = when (context) {
+    SkinContext.LAUNCHER,
+    SkinContext.ADVANCED_SCUMMVM,
+    -> resolvedSkin.theme
+    SkinContext.GAMEPLAY -> selectedColourTheme
+}
 
 internal object SkinSlots {
     const val PREVIEW = "preview"
@@ -172,7 +188,7 @@ internal fun SkinnableButton.artworkCandidates(pressed: Boolean): Array<String> 
 internal fun builtInSkins(): List<InstalledSkin> = listOf(
     builtInSkin(BUILTIN_DEFAULT_SKIN_ID, "Default", AdventurePadThemes.Default),
     builtInSkin(BUILTIN_OCEAN_SKIN_ID, "Ocean", AdventurePadThemes.Ocean),
-    builtInSkin(BUILTIN_ADVENTURE_SKIN_ID, "AdventurePad Launcher", AdventurePadThemes.Adventure),
+    builtInSkin(BUILTIN_ADVENTURE_SKIN_ID, "AdventurePad Launcher", AdventurePadThemes.Launcher),
 )
 
 internal fun InstalledSkin.isGameplaySelectable(): Boolean =
@@ -213,22 +229,64 @@ internal fun resolveSkinIdForContext(
     context: SkinContext,
     targetId: String?,
     gameplayAssignments: Map<String, String>,
-    launcherSkinId: String = BUILTIN_ADVENTURE_SKIN_ID,
 ): String = when (context) {
-    SkinContext.LAUNCHER -> launcherSkinId
+    SkinContext.LAUNCHER,
+    SkinContext.ADVANCED_SCUMMVM,
+    -> BUILTIN_ADVENTURE_SKIN_ID
     SkinContext.GAMEPLAY -> targetId?.trim()?.takeIf(String::isNotEmpty)
         ?.let(gameplayAssignments::get)
         ?.takeUnless { it == BUILTIN_ADVENTURE_SKIN_ID }
         ?: BUILTIN_DEFAULT_SKIN_ID
-    SkinContext.ADVANCED_SCUMMVM -> BUILTIN_DEFAULT_SKIN_ID
 }
 
-/** Geometry is the authoritative signal that a persistent lower activity entered or left gameplay. */
-internal fun lowerSkinContextForTarget(
-    requestedContext: SkinContext,
-    reportedTargetId: String,
-): SkinContext = when {
-    requestedContext == SkinContext.ADVANCED_SCUMMVM -> SkinContext.ADVANCED_SCUMMVM
+/** Legacy management intents are canonicalized before resolving the lower-screen presentation. */
+internal fun SkinContext.asLowerScreenContext(): SkinContext = when (this) {
+    SkinContext.ADVANCED_SCUMMVM -> SkinContext.LAUNCHER
+    else -> this
+}
+
+/** The reported target is the authoritative signal that the persistent lower activity is in gameplay. */
+internal fun lowerSkinContextForTarget(reportedTargetId: String): SkinContext = when {
     reportedTargetId.isBlank() -> SkinContext.LAUNCHER
     else -> SkinContext.GAMEPLAY
 }
+
+/** Explicit management navigation wins over cached geometry until ScummVM publishes fresh state. */
+internal fun lowerSkinContextForIntent(
+    requestedContext: SkinContext,
+    cachedTargetId: String?,
+): SkinContext = when {
+    requestedContext != SkinContext.GAMEPLAY -> SkinContext.LAUNCHER
+    cachedTargetId == null -> SkinContext.GAMEPLAY
+    else -> lowerSkinContextForTarget(cachedTargetId)
+}
+
+private val ImmersiveControlArtwork = listOf(
+    SkinnableButton.LMB,
+    SkinnableButton.RMB,
+    SkinnableButton.COMPANION,
+    SkinnableButton.SETTINGS,
+)
+
+/** Only installed game skins with artwork for every hidden native control may use Immersive. */
+internal fun ResolvedSkin.supportsImmersiveGameplayArtwork(): Boolean =
+    !skin.isBuiltIn && ImmersiveControlArtwork.all { button ->
+        resolveAssetSlot(*button.artworkCandidates(pressed = false)) != null
+    }
+
+/** Requested style is stored independently; this is the authoritative current-context safety gate. */
+internal fun effectiveInterfaceStyle(
+    context: SkinContext,
+    requestedStyle: InterfaceStyle,
+    supportsImmersiveArtwork: Boolean,
+): InterfaceStyle = if (
+    context == SkinContext.GAMEPLAY && supportsImmersiveArtwork
+) {
+    requestedStyle
+} else {
+    InterfaceStyle.STANDARD
+}
+
+/** Selecting or re-selecting a real skin starts that game's presentation in Immersive. */
+internal fun defaultRequestedStyleForSkinSelection(skinId: String?): InterfaceStyle? =
+    skinId?.let { InterfaceStyle.IMMERSIVE }

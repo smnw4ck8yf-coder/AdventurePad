@@ -19,12 +19,15 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -38,9 +41,11 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ButtonDefaults
@@ -52,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,26 +73,32 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.PointerInputChange
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.lifecycleScope
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
-import com.jamesmoran.adventurepad.ui.theme.AdventurePadTheme
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeDefinition
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemes
@@ -181,7 +193,15 @@ class TrackpadActivity : ComponentActivity() {
         Log.i("AdventurePadTarget", "TrackpadActivity onCreate")
 
         receivedIntentFlags = intent.flags
-        lowerSkinContext = intent.skinContextOr(SkinContext.GAMEPLAY)
+        lowerSkinContext = lowerSkinContextForIntent(
+            requestedContext = intent.skinContextOr(SkinContext.GAMEPLAY),
+            cachedTargetId = null,
+        )
+        Log.i(
+            THEME_DIAGNOSTIC_TAG,
+            "onCreate requestedContext=${intent.skinContextOr(SkinContext.GAMEPLAY)} " +
+                "resolvedContext=$lowerSkinContext",
+        )
         currentDisplayId = display?.displayId ?: Display.INVALID_DISPLAY
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
             ?.let { "Launched because: $it" }
@@ -222,7 +242,6 @@ class TrackpadActivity : ComponentActivity() {
         setContent {
             val pointerSpeed by pointerSpeedRepository.pointerSpeed.collectAsState()
             val activeColourTheme by themePreferencesRepository.activeTheme.collectAsState()
-            val activeInterfaceStyle by interfaceStylePreferencesRepository.activeStyle.collectAsState()
             val skinCatalog by skinRepository.catalog.collectAsState()
             val skinSelectionRevision by skinRepository.selectionRevision.collectAsState()
             val displayModePreferences by displayModePreferencesRepository.preferences.collectAsState()
@@ -231,6 +250,14 @@ class TrackpadActivity : ComponentActivity() {
             val walkthroughSelection by walkthroughRepository.selection.collectAsState()
             val cropProfile = cropSelection.profile
             val currentGameId = companionTargetId
+            val requestedInterfaceStyleFlow = remember(currentGameId) {
+                interfaceStylePreferencesRepository.requestedStyle(currentGameId)
+            }
+            val requestedInterfaceStyle by requestedInterfaceStyleFlow.collectAsState(
+                // A newly selected flow may not have replayed its persisted value yet. Standard
+                // avoids even a single frame of hidden native controls during a game transition.
+                initial = InterfaceStyle.STANDARD,
+            )
             val activeSkin = remember(
                 lowerSkinContext,
                 currentGameId,
@@ -239,6 +266,19 @@ class TrackpadActivity : ComponentActivity() {
                 activeColourTheme,
             ) {
                 skinRepository.resolve(lowerSkinContext, currentGameId, activeColourTheme)
+            }
+            val nativeTheme = remember(lowerSkinContext, activeColourTheme, activeSkin) {
+                nativeThemeForSkinContext(lowerSkinContext, activeColourTheme, activeSkin)
+            }
+            LaunchedEffect(lowerSkinContext, currentGameId, activeSkin, nativeTheme) {
+                Log.i(
+                    THEME_DIAGNOSTIC_TAG,
+                    "resolved context=$lowerSkinContext target='$currentGameId' " +
+                        "skin=${activeSkin.id} skinTheme=${activeSkin.theme.id} " +
+                        "nativeTheme=${nativeTheme.id} " +
+                        "outer=${nativeTheme.colors.background.diagnosticHex()} " +
+                        "trackpad=${nativeTheme.components.trackpadBackground.diagnosticHex()}",
+                )
             }
             var pendingCreatedSkin by remember { mutableStateOf<InstalledSkin?>(null) }
             var skinBuildError by remember { mutableStateOf<String?>(null) }
@@ -262,7 +302,7 @@ class TrackpadActivity : ComponentActivity() {
                 .takeIf { walkthroughSelection.gameId == currentGameId }
             AdventurePadSkinTheme(
                 skin = activeSkin,
-                nativeTheme = nativeThemeForGameSkin(activeColourTheme, activeSkin),
+                nativeTheme = nativeTheme,
             ) {
                 AdventurePadScreen(
                     mouseDiagnostics = mouseDiagnostics,
@@ -291,7 +331,8 @@ class TrackpadActivity : ComponentActivity() {
                     touchProvenance = touchProvenance,
                     pointerSpeed = pointerSpeed,
                     activeColourTheme = activeColourTheme,
-                    interfaceStyle = activeInterfaceStyle,
+                    requestedInterfaceStyle = requestedInterfaceStyle,
+                    skinContext = lowerSkinContext,
                     activeSkin = activeSkin,
                     installedSkins = skinCatalog,
                     onPointerSpeedSelected = { selectedSpeed ->
@@ -303,9 +344,21 @@ class TrackpadActivity : ComponentActivity() {
                         lifecycleScope.launch { themePreferencesRepository.selectTheme(selectedTheme) }
                     },
                     onInterfaceStyleSelected = { selectedStyle ->
-                        lifecycleScope.launch { interfaceStylePreferencesRepository.selectStyle(selectedStyle) }
+                        if (currentGameId.isNotBlank()) lifecycleScope.launch {
+                            interfaceStylePreferencesRepository.selectStyle(currentGameId, selectedStyle)
+                        }
                     },
-                    onSkinSelected = { skinId -> skinRepository.assignGameplaySkin(currentGameId, skinId) },
+                    onSkinSelected = { skinId ->
+                        skinRepository.assignGameplaySkin(currentGameId, skinId)
+                        defaultRequestedStyleForSkinSelection(skinId)?.let { defaultStyle ->
+                            lifecycleScope.launch {
+                                interfaceStylePreferencesRepository.selectStyle(
+                                    currentGameId,
+                                    defaultStyle,
+                                )
+                            }
+                        }
+                    },
                     onAddSkin = {
                         addSkinLauncher.launch(arrayOf("image/png"))
                     },
@@ -374,6 +427,12 @@ class TrackpadActivity : ComponentActivity() {
                                 enabled = currentGameId.isNotBlank(),
                                 onClick = {
                                     skinRepository.assignGameplaySkin(currentGameId, imported.manifest.id)
+                                    lifecycleScope.launch {
+                                        interfaceStylePreferencesRepository.selectStyle(
+                                            currentGameId,
+                                            InterfaceStyle.IMMERSIVE,
+                                        )
+                                    }
                                     pendingCreatedSkin = null
                                 },
                             ) { Text("APPLY") }
@@ -562,7 +621,12 @@ class TrackpadActivity : ComponentActivity() {
         "handleMirrorGeometry gameId='${geometry.gameId}' generation=${geometry.generation}"
     )
         val previous = mirrorSourceGeometry
-        lowerSkinContext = lowerSkinContextForTarget(lowerSkinContext, geometry.gameId)
+        val previousSkinContext = lowerSkinContext
+        lowerSkinContext = lowerSkinContextForTarget(geometry.gameId)
+        Log.i(
+            THEME_DIAGNOSTIC_TAG,
+            "geometry target='${geometry.gameId}' context=$previousSkinContext->$lowerSkinContext",
+        )
         val changed = previous != null &&
             (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
         mirrorSourceGeometry = geometry
@@ -838,9 +902,15 @@ class TrackpadActivity : ComponentActivity() {
         CursorDeltaCoordinator.releaseJoystickAxes()
         setIntent(intent)
         val requestedSkinContext = intent.skinContextOr(lowerSkinContext)
-        lowerSkinContext = mirrorSourceGeometry?.let { geometry ->
-            lowerSkinContextForTarget(requestedSkinContext, geometry.gameId)
-        } ?: requestedSkinContext
+        lowerSkinContext = lowerSkinContextForIntent(
+            requestedContext = requestedSkinContext,
+            cachedTargetId = mirrorSourceGeometry?.gameId,
+        )
+        Log.i(
+            THEME_DIAGNOSTIC_TAG,
+            "onNewIntent requestedContext=$requestedSkinContext resolvedContext=$lowerSkinContext " +
+                "geometryTarget='${mirrorSourceGeometry?.gameId.orEmpty()}'",
+        )
         receivedIntentFlags = intent.flags
         lastLaunchResult = intent.getStringExtra(DualDisplayCoordinator.EXTRA_LAUNCH_REASON)
             ?.let { "Received launch request: $it" }
@@ -1261,7 +1331,8 @@ private fun AdventurePadScreen(
     touchProvenance: TrackpadTouchProvenance,
     pointerSpeed: PointerSpeed,
     activeColourTheme: AdventurePadThemeDefinition,
-    interfaceStyle: InterfaceStyle,
+    requestedInterfaceStyle: InterfaceStyle,
+    skinContext: SkinContext,
     activeSkin: ResolvedSkin,
     installedSkins: List<InstalledSkin>,
     onPointerSpeedSelected: (PointerSpeed) -> Unit,
@@ -1291,6 +1362,28 @@ private fun AdventurePadScreen(
     onRestoreBothScreens: () -> Unit,
 ) {
     val touchState = remember { mutableStateOf(TouchState()) }
+    val launcherPresentation = skinContext == SkinContext.LAUNCHER
+    val immersiveAvailable = activeSkin.supportsImmersiveGameplayArtwork()
+    val interfaceStyle = effectiveInterfaceStyle(
+        context = skinContext,
+        requestedStyle = requestedInterfaceStyle,
+        supportsImmersiveArtwork = immersiveAvailable,
+    )
+    val immersivePresentation = interfaceStyle == InterfaceStyle.IMMERSIVE
+    LaunchedEffect(
+        requestedInterfaceStyle,
+        interfaceStyle,
+        immersivePresentation,
+        immersiveAvailable,
+    ) {
+        Log.i(
+            THEME_DIAGNOSTIC_TAG,
+            "interface requested=$requestedInterfaceStyle resolved=$interfaceStyle " +
+                "immersive=$immersivePresentation " +
+                "standardTrackpadChrome=${!immersivePresentation} " +
+                "immersiveTrackpadArtwork=${immersivePresentation && immersiveAvailable}",
+        )
+    }
     var diagnosticsVisible by remember { mutableStateOf(false) }
     var activePage by rememberSaveable { mutableStateOf(LowerScreenPage.GAMEPLAY) }
     var companionSection by rememberSaveable { mutableStateOf(CompanionSection.HOME) }
@@ -1350,6 +1443,11 @@ private fun AdventurePadScreen(
                         ?: 0.dp
                     val maximumInterfaceHeight = (maxHeight - NormalLayoutReservedHeight).coerceAtLeast(0.dp)
                     val interfaceHeight = minOf(desiredInterfaceHeight, maximumInterfaceHeight)
+                    val showSplitPanelFrame = shouldShowSplitPanelFrame(
+                        splitViewActive = interfacePanelVisible,
+                        interfaceStyle = interfaceStyle,
+                        hasPanelFrameAsset = activeSkin.resolveAssetSlot(SkinSlots.PANEL_FRAME) != null,
+                    )
                     Column(Modifier.fillMaxSize()) {
                         if (interfacePanelVisible) {
                             MirrorPrototypePanel(
@@ -1360,31 +1458,132 @@ private fun AdventurePadScreen(
                                 cursorState = mirrorCursorState,
                                 cropGeneration = activeCropGeneration,
                                 displayMode = displayMode,
+                                showPanelFrame = showSplitPanelFrame,
                                 onViewAvailable = onMirrorViewAvailable,
                                 onViewDisposed = onMirrorViewDisposed,
                             )
                         }
-                        TouchSurface(
-                            touchState = touchState,
-                            gestureResetGeneration = gestureResetGeneration,
-                            touchProvenance = touchProvenance,
-                            pointerSpeed = pointerSpeed,
-                            onGesture = onGesture,
-                            onGestureDiagnostic = onGestureDiagnostic,
-                            onButtonDown = onButtonDown,
-                            onButtonUp = onButtonUp,
-                            immersive = interfaceStyle == InterfaceStyle.IMMERSIVE,
-                            modifier = Modifier
+                        if (launcherPresentation) {
+                            LauncherTrackpadSurface(
+                                touchState = touchState,
+                                gestureResetGeneration = gestureResetGeneration,
+                                touchProvenance = touchProvenance,
+                                pointerSpeed = pointerSpeed,
+                                onGesture = onGesture,
+                                onGestureDiagnostic = onGestureDiagnostic,
+                                onButtonDown = onButtonDown,
+                                onButtonUp = onButtonUp,
+                            )
+                        } else {
+                            val trackpadRegionModifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f)
                                 .heightIn(min = MinimumNormalTrackpadHeight)
-                                .padding(horizontal = AdventurePadDesign.spacingMd, vertical = 3.dp),
-                        )
-                        GameplayUtilityBar(
-                            immersive = interfaceStyle == InterfaceStyle.IMMERSIVE,
-                            onOpenCompanion = { navigate(LowerScreenNavigationAction.OpenCompanion) },
-                            onOpenSettings = { navigate(LowerScreenNavigationAction.OpenSettings) },
-                        )
+                            if (immersivePresentation) {
+                                BoxWithConstraints(
+                                    modifier = trackpadRegionModifier
+                                        .padding(
+                                            horizontal = AdventurePadDesign.spacingMd,
+                                            vertical = IMMERSIVE_TRACKPAD_REGION_VERTICAL_PADDING_DP.dp,
+                                        )
+                                        .onSizeChanged { size ->
+                                            Log.i(
+                                                LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                                                "immersive trackpad region=${size.width}x${size.height} " +
+                                                    "widthScale=$IMMERSIVE_TRACKPAD_SCALE " +
+                                                    "splitExtraHeightDp=$IMMERSIVE_SPLIT_TRACKPAD_EXTRA_HEIGHT_DP " +
+                                                    "split=$interfacePanelVisible",
+                                            )
+                                        },
+                                    contentAlignment = Alignment.BottomCenter,
+                                ) {
+                                    val baseSurfaceHeight = maxHeight * IMMERSIVE_TRACKPAD_SCALE
+                                    val surfaceHeight = if (interfacePanelVisible) {
+                                        (baseSurfaceHeight + IMMERSIVE_SPLIT_TRACKPAD_EXTRA_HEIGHT_DP.dp)
+                                            .coerceAtMost(maxHeight)
+                                    } else {
+                                        baseSurfaceHeight
+                                    }
+                                    val surfaceHeightExpansion = surfaceHeight - baseSurfaceHeight
+                                    TouchSurface(
+                                        touchState = touchState,
+                                        gestureResetGeneration = gestureResetGeneration,
+                                        touchProvenance = touchProvenance,
+                                        pointerSpeed = pointerSpeed,
+                                        onGesture = onGesture,
+                                        onGestureDiagnostic = onGestureDiagnostic,
+                                        onButtonDown = onButtonDown,
+                                        onButtonUp = onButtonUp,
+                                        immersive = true,
+                                        launcherPresentation = false,
+                                        overlaySizingHeightReduction = surfaceHeightExpansion,
+                                        modifier = Modifier
+                                            .fillMaxWidth(IMMERSIVE_TRACKPAD_SCALE)
+                                            .height(surfaceHeight)
+                                            .offset(
+                                                y = -(
+                                                    IMMERSIVE_TRACKPAD_BOTTOM_GAP_DP -
+                                                        IMMERSIVE_TRACKPAD_REGION_VERTICAL_PADDING_DP
+                                                    ).dp,
+                                            )
+                                            .onGloballyPositioned { coordinates ->
+                                                val bounds = coordinates.boundsInRoot()
+                                                Log.i(
+                                                    LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                                                    "immersive trackpad boundsInRoot=$bounds " +
+                                                        "bottomGapDp=$IMMERSIVE_TRACKPAD_BOTTOM_GAP_DP " +
+                                                        "split=$interfacePanelVisible",
+                                                )
+                                            },
+                                    )
+                                }
+                            } else {
+                                Box(
+                                    modifier = trackpadRegionModifier.padding(
+                                        horizontal = AdventurePadDesign.spacingMd,
+                                        vertical = 3.dp,
+                                    ),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    TouchSurface(
+                                        touchState = touchState,
+                                        gestureResetGeneration = gestureResetGeneration,
+                                        touchProvenance = touchProvenance,
+                                        pointerSpeed = pointerSpeed,
+                                        onGesture = onGesture,
+                                        onGestureDiagnostic = onGestureDiagnostic,
+                                        onButtonDown = onButtonDown,
+                                        onButtonUp = onButtonUp,
+                                        immersive = false,
+                                        launcherPresentation = false,
+                                        overlayHeightScale =
+                                            1f / AdventurePadDesign.standardGameplayTrackpadHeightScale,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .fillMaxHeight(
+                                                AdventurePadDesign.standardGameplayTrackpadHeightScale,
+                                            ),
+                                    )
+                                }
+                            }
+                            GameplayUtilityBar(
+                                immersive = immersivePresentation,
+                                launcherPresentation = false,
+                                onOpenCompanion = { navigate(LowerScreenNavigationAction.OpenCompanion) },
+                                onOpenSettings = { navigate(LowerScreenNavigationAction.OpenSettings) },
+                                modifier = if (immersivePresentation) {
+                                    Modifier.onGloballyPositioned { coordinates ->
+                                        Log.i(
+                                            LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                                            "immersive utility boundsInRoot=${coordinates.boundsInRoot()} " +
+                                                "split=$interfacePanelVisible",
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            )
+                        }
                     }
                 }
             }
@@ -1461,7 +1660,7 @@ private fun AdventurePadScreen(
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
-                    LowerScreenPage.SETTINGS -> AdventurePadTheme(theme = activeColourTheme) {
+                    LowerScreenPage.SETTINGS -> {
                         Box(
                             Modifier.fillMaxSize()
                                 .background(AdventurePadThemeTokens.colors.background),
@@ -1472,6 +1671,7 @@ private fun AdventurePadScreen(
                                 activeColourTheme = activeColourTheme,
                                 onColourThemeSelected = onColourThemeSelected,
                                 interfaceStyle = interfaceStyle,
+                                immersiveAvailable = immersiveAvailable,
                                 onInterfaceStyleSelected = onInterfaceStyleSelected,
                                 activeSkin = activeSkin,
                                 installedSkins = installedSkins,
@@ -1523,6 +1723,77 @@ private fun AdventurePadScreen(
 }
 
 @Composable
+private fun LauncherTrackpadSurface(
+    touchState: MutableState<TouchState>,
+    gestureResetGeneration: Int,
+    touchProvenance: TrackpadTouchProvenance,
+    pointerSpeed: PointerSpeed,
+    onGesture: (TrackpadGesture) -> Unit,
+    onGestureDiagnostic: (String) -> Unit,
+    onButtonDown: (ScummVMMouseButton) -> Unit,
+    onButtonUp: (ScummVMMouseButton) -> Unit,
+) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val previousVisibleWidth = (
+            maxWidth - AdventurePadDesign.launcherTrackpadHorizontalPadding * 2
+        ).coerceAtLeast(0.dp)
+        val previousVisibleHeight = (
+            maxHeight - AdventurePadDesign.launcherPreviousUtilityBarHeight -
+                AdventurePadDesign.launcherTrackpadTopPadding -
+                AdventurePadDesign.launcherTrackpadBottomPadding
+        ).coerceAtLeast(0.dp)
+        val visibleWidth = previousVisibleWidth * AdventurePadDesign.launcherTrackpadLinearScale
+        val visibleHeight = previousVisibleHeight * AdventurePadDesign.launcherTrackpadLinearScale
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            androidx.compose.foundation.layout.Spacer(
+                Modifier.height(AdventurePadDesign.launcherAssemblyTopOffset),
+            )
+            TouchSurface(
+                touchState = touchState,
+                gestureResetGeneration = gestureResetGeneration,
+                touchProvenance = touchProvenance,
+                pointerSpeed = pointerSpeed,
+                onGesture = onGesture,
+                onGestureDiagnostic = onGestureDiagnostic,
+                onButtonDown = onButtonDown,
+                onButtonUp = onButtonUp,
+                immersive = false,
+                launcherPresentation = true,
+                modifier = Modifier
+                    .width(
+                        visibleWidth + AdventurePadDesign.launcherTrackpadHorizontalPadding * 2,
+                    )
+                    .height(
+                        visibleHeight + AdventurePadDesign.launcherTrackpadTopPadding +
+                            AdventurePadDesign.launcherTrackpadBottomPadding,
+                    )
+                    .padding(
+                        start = AdventurePadDesign.launcherTrackpadHorizontalPadding,
+                        top = AdventurePadDesign.launcherTrackpadTopPadding,
+                        end = AdventurePadDesign.launcherTrackpadHorizontalPadding,
+                        bottom = AdventurePadDesign.launcherTrackpadBottomPadding,
+                    ),
+            )
+            Image(
+                painter = painterResource(R.drawable.adventurepad_logo),
+                contentDescription = "AdventurePad",
+                modifier = Modifier
+                    .padding(top = AdventurePadDesign.launcherLogoTopSpacing)
+                    .fillMaxWidth(0.45f)
+                    .widthIn(max = AdventurePadDesign.launcherLogoWidth)
+                    .aspectRatio(AdventurePadDesign.launcherLogoAspectRatio),
+            )
+            androidx.compose.foundation.layout.Spacer(
+                Modifier.height(AdventurePadDesign.launcherLogoBottomSpacing),
+            )
+        }
+    }
+}
+
+@Composable
 private fun MirrorPrototypePanel(
     status: MirrorOutputStatus,
     panelHeight: androidx.compose.ui.unit.Dp,
@@ -1531,11 +1802,15 @@ private fun MirrorPrototypePanel(
     cursorState: MirrorCursorState,
     cropGeneration: Long,
     displayMode: DisplayMode,
+    showPanelFrame: Boolean,
     onViewAvailable: (MirrorHost) -> Unit,
     onViewDisposed: (MirrorHost) -> Unit,
 ) {
     val context = LocalContext.current
     val mirrorHost = remember(context) { createMirrorHost(context) }
+    val panelFrameArtwork = if (showPanelFrame) {
+        rememberSkinFrameArtwork(SkinSlots.PANEL_FRAME)
+    } else null
     val themeColors = AdventurePadThemeTokens.colors
     val componentStyles = AdventurePadThemeTokens.components
     var panelWidth by remember { mutableIntStateOf(0) }
@@ -1554,14 +1829,57 @@ private fun MirrorPrototypePanel(
             .onSizeChanged {
                 panelWidth = it.width
                 panelHeightPixels = it.height
+            }
+            .onGloballyPositioned { coordinates ->
+                if (showPanelFrame) {
+                    val bounds = coordinates.boundsInRoot()
+                    Log.i(
+                        LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                        "split interface boundsInRoot left=${bounds.left} top=${bounds.top} " +
+                            "right=${bounds.right} bottom=${bounds.bottom} " +
+                            "width=${bounds.width} height=${bounds.height}",
+                    )
+                }
             },
     ) {
+        val outerRect = PixelRect(0, 0, panelWidth, panelHeightPixels)
+        val framePatches = panelFrameArtwork?.patches(panelWidth, panelHeightPixels)
+        val frameOpening = framePatches?.let {
+            panelFrameArtwork.contentRect(panelWidth, panelHeightPixels, it)
+        }
+        val interfaceRect = frameOpening
+            ?.takeIf { it.width > 0 && it.height > 0 }
+            ?: outerRect
+        val contentTransform = PanelContentTransform(
+            content = interfaceRect,
+            interfaceWidth = panelWidth,
+            interfaceHeight = panelHeightPixels,
+        )
+        LaunchedEffect(panelFrameArtwork, panelWidth, panelHeightPixels, interfaceRect) {
+            if (panelFrameArtwork != null && panelWidth > 0 && panelHeightPixels > 0) {
+                Log.i(
+                    LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                    "panel frame sourceVisible=${panelFrameArtwork.visibleBounds} " +
+                        "sourceOpening=${panelFrameArtwork.contentBounds} " +
+                        "displayOpening=$interfaceRect surface=${panelWidth}x$panelHeightPixels " +
+                        "scale=${interfaceRect.width.toFloat() / panelWidth}," +
+                        "${interfaceRect.height.toFloat() / panelHeightPixels}",
+                )
+            }
+        }
         val panelGeometry = geometry?.let {
-            lowerPanelGeometry(panelWidth, panelHeightPixels, crop, it.width, it.height, it.orientation)
+            lowerPanelGeometry(
+                panelWidth,
+                panelHeightPixels,
+                crop,
+                it.width,
+                it.height,
+                it.orientation,
+            )
         }
         AndroidView(
             factory = { mirrorHost.view },
-            update = {
+            update = { view ->
                 mirrorHost.configureDirectTouch(
                     crop = crop,
                     geometry = geometry,
@@ -1569,13 +1887,28 @@ private fun MirrorPrototypePanel(
                     enabled = displayMode == DisplayMode.INTERFACE &&
                         status.state == MirrorOutputState.SUPPORTED,
                 )
+                view.pivotX = 0f
+                view.pivotY = 0f
+                view.scaleX = if (panelWidth > 0) interfaceRect.width.toFloat() / panelWidth else 1f
+                view.scaleY = if (panelHeightPixels > 0) {
+                    interfaceRect.height.toFloat() / panelHeightPixels
+                } else 1f
+                view.translationX = interfaceRect.left.toFloat()
+                view.translationY = interfaceRect.top.toFloat()
             },
             modifier = Modifier.fillMaxSize(),
         )
+        if (panelFrameArtwork != null) {
+            SkinFrameArtwork(
+                artwork = panelFrameArtwork,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         val cursorPoint = cursorState
             .takeIf { it.visible && it.geometryGeneration == geometry?.generation }
             ?.point
             ?.let { panelGeometry?.mapSource(it) }
+            ?.let { contentTransform.interfaceToOuter(PixelPoint(it.x, it.y)) }
         if (cursorPoint != null) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val center = Offset(cursorPoint.x, cursorPoint.y)
@@ -1595,6 +1928,14 @@ private fun MirrorPrototypePanel(
     }
 }
 
+internal fun shouldShowSplitPanelFrame(
+    splitViewActive: Boolean,
+    interfaceStyle: InterfaceStyle,
+    hasPanelFrameAsset: Boolean,
+): Boolean = splitViewActive &&
+    interfaceStyle == InterfaceStyle.IMMERSIVE &&
+    hasPanelFrameAsset
+
 @Composable
 private fun PointerSpeedSettings(
     pointerSpeed: PointerSpeed,
@@ -1602,6 +1943,7 @@ private fun PointerSpeedSettings(
     activeColourTheme: AdventurePadThemeDefinition,
     onColourThemeSelected: (AdventurePadThemeDefinition) -> Unit,
     interfaceStyle: InterfaceStyle,
+    immersiveAvailable: Boolean,
     onInterfaceStyleSelected: (InterfaceStyle) -> Unit,
     activeSkin: ResolvedSkin,
     installedSkins: List<InstalledSkin>,
@@ -1681,25 +2023,6 @@ private fun PointerSpeedSettings(
             style = MaterialTheme.typography.bodySmall,
         )
         SettingsSectionTitle("THEMES")
-        Text(
-            text = "Interface Style",
-            color = AdventurePadThemeTokens.colors.textPrimary,
-            fontWeight = FontWeight.Bold,
-            style = MaterialTheme.typography.titleMedium,
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(AdventurePadDesign.spacingSm),
-        ) {
-            InterfaceStyle.entries.forEach { style ->
-                SettingsOptionButton(
-                    label = style.displayName,
-                    selected = style == interfaceStyle,
-                    onClick = { onInterfaceStyleSelected(style) },
-                    modifier = Modifier.weight(1f),
-                )
-            }
-        }
         OutlinedButton(
             onClick = { themeDialogVisible = true },
             colors = ButtonDefaults.outlinedButtonColors(contentColor = AdventurePadThemeTokens.colors.textPrimary),
@@ -1708,8 +2031,22 @@ private fun PointerSpeedSettings(
         ) {
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("Colour theme", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Text(activeColourTheme.displayName, color = AdventurePadThemeTokens.colors.textSecondary)
+                Text(
+                    if (interfaceStyle == InterfaceStyle.IMMERSIVE) {
+                        InterfaceStyle.IMMERSIVE.displayName
+                    } else {
+                        activeColourTheme.displayName
+                    },
+                    color = AdventurePadThemeTokens.colors.textSecondary,
+                )
             }
+        }
+        if (!immersiveAvailable) {
+            Text(
+                text = "Immersive is available when a game skin with immersive control artwork is applied.",
+                color = AdventurePadThemeTokens.colors.textSecondary,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
         OutlinedButton(
             onClick = { skinDialogVisible = true },
@@ -1803,8 +2140,15 @@ private fun PointerSpeedSettings(
     if (themeDialogVisible) {
         ThemeSelectionDialog(
             activeTheme = activeColourTheme,
-            onThemeSelected = {
-                onColourThemeSelected(it)
+            interfaceStyle = interfaceStyle,
+            immersiveAvailable = immersiveAvailable,
+            onOptionSelected = { option ->
+                if (option.immersive) {
+                    onInterfaceStyleSelected(InterfaceStyle.IMMERSIVE)
+                } else {
+                    option.theme?.let(onColourThemeSelected)
+                    onInterfaceStyleSelected(InterfaceStyle.STANDARD)
+                }
                 themeDialogVisible = false
             },
             onDismiss = { themeDialogVisible = false },
@@ -1926,24 +2270,62 @@ private fun SkinSelectionDialog(
     }
 }
 
+internal data class ColourThemeSelectorOption(
+    val displayName: String,
+    val theme: AdventurePadThemeDefinition?,
+    val immersive: Boolean,
+    val enabled: Boolean,
+)
+
+internal fun colourThemeSelectorOptions(immersiveAvailable: Boolean): List<ColourThemeSelectorOption> =
+    AdventurePadThemes.BuiltIns.map { theme ->
+        ColourThemeSelectorOption(
+            displayName = theme.displayName,
+            theme = theme,
+            immersive = false,
+            enabled = true,
+        )
+    } + ColourThemeSelectorOption(
+        displayName = InterfaceStyle.IMMERSIVE.displayName,
+        theme = null,
+        immersive = true,
+        enabled = immersiveAvailable,
+    )
+
 @Composable
 private fun ThemeSelectionDialog(
     activeTheme: AdventurePadThemeDefinition,
-    onThemeSelected: (AdventurePadThemeDefinition) -> Unit,
+    interfaceStyle: InterfaceStyle,
+    immersiveAvailable: Boolean,
+    onOptionSelected: (ColourThemeSelectorOption) -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Colour theme") },
         text = {
-            Column {
-                AdventurePadThemes.BuiltIns.forEach { theme ->
+            Column(
+                modifier = Modifier
+                    .heightIn(max = 480.dp)
+                    .verticalScroll(rememberScrollState()),
+            ) {
+                colourThemeSelectorOptions(immersiveAvailable).forEach { option ->
                     OutlinedButton(
-                        onClick = { onThemeSelected(theme) },
+                        onClick = { onOptionSelected(option) },
+                        enabled = option.enabled,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        RadioButton(selected = theme.id == activeTheme.id, onClick = null)
-                        Text(theme.displayName, modifier = Modifier.weight(1f))
+                        RadioButton(
+                            selected = if (option.immersive) {
+                                interfaceStyle == InterfaceStyle.IMMERSIVE
+                            } else {
+                                interfaceStyle != InterfaceStyle.IMMERSIVE &&
+                                    option.theme?.id == activeTheme.id
+                            },
+                            enabled = option.enabled,
+                            onClick = null,
+                        )
+                        Text(option.displayName, modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -1958,11 +2340,13 @@ private fun SettingsOptionButton(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
     emphasizeSelection: Boolean = false,
     singleLine: Boolean = false,
 ) {
     OutlinedButton(
         onClick = onClick,
+        enabled = enabled,
         colors = ButtonDefaults.outlinedButtonColors(
             containerColor = if (selected) {
                 AdventurePadThemeTokens.colors.surfacePressed
@@ -2157,13 +2541,28 @@ private fun Float.formatOneDecimal(): String = String.format(Locale.ROOT, "%.1f"
 @Composable
 private fun GameplayUtilityBar(
     immersive: Boolean,
+    launcherPresentation: Boolean,
     onOpenCompanion: () -> Unit,
     onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = AdventurePadDesign.spacingMd, vertical = AdventurePadDesign.spacingXs),
+            .padding(
+                start = if (launcherPresentation) {
+                    AdventurePadDesign.launcherUtilityBarHorizontalPadding
+                } else AdventurePadDesign.spacingMd,
+                top = if (launcherPresentation) {
+                    AdventurePadDesign.launcherUtilityBarTopPadding
+                } else AdventurePadDesign.spacingXs,
+                end = if (launcherPresentation) {
+                    AdventurePadDesign.launcherUtilityBarHorizontalPadding
+                } else AdventurePadDesign.spacingMd,
+                bottom = if (launcherPresentation) {
+                    AdventurePadDesign.launcherUtilityBarBottomPadding
+                } else AdventurePadDesign.spacingXs,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         StatefulSkinUtilityButton(
@@ -2171,6 +2570,12 @@ private fun GameplayUtilityBar(
             onClick = onOpenCompanion,
             label = GameplayUtilityAction.COMPANION.displayLabel(),
             immersive = immersive,
+            launcherPresentation = launcherPresentation,
+            modifier = if (immersive) {
+                Modifier.offset(y = -IMMERSIVE_UTILITY_UPWARD_OFFSET_DP.dp)
+            } else {
+                Modifier
+            },
         )
         androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
         StatefulSkinUtilityButton(
@@ -2178,6 +2583,12 @@ private fun GameplayUtilityBar(
             onClick = onOpenSettings,
             label = GameplayUtilityAction.SETTINGS.displayLabel(),
             immersive = immersive,
+            launcherPresentation = launcherPresentation,
+            modifier = if (immersive) {
+                Modifier.offset(y = -IMMERSIVE_UTILITY_UPWARD_OFFSET_DP.dp)
+            } else {
+                Modifier
+            },
         )
     }
 }
@@ -2187,17 +2598,44 @@ private fun StatefulSkinUtilityButton(
     button: SkinnableButton,
     label: String,
     immersive: Boolean,
+    launcherPresentation: Boolean,
     onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val density = LocalDensity.current
     var measuredSize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
+    val shape = AdventurePadThemeTokens.shapes.medium
     Box(
-        Modifier.then(
-            if (immersive) Modifier else Modifier
-                .background(AdventurePadThemeTokens.colors.surfaceRaised, AdventurePadThemeTokens.shapes.medium)
-                .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.medium),
+        modifier
+            .onGloballyPositioned { coordinates ->
+                if (immersive) {
+                    Log.i(
+                        LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                        "immersive utility control=$label boundsInRoot=${coordinates.boundsInRoot()} " +
+                            "upwardOffsetDp=$IMMERSIVE_UTILITY_UPWARD_OFFSET_DP",
+                    )
+                }
+            }
+            .then(
+            when {
+                immersive -> Modifier
+                launcherPresentation -> Modifier
+                    .background(
+                        if (pressed) AdventurePadThemeTokens.components.launcherAccentDark
+                        else AdventurePadThemeTokens.components.launcherContent,
+                        shape,
+                    )
+                    .border(
+                        AdventurePadDesign.launcherControlBorderWidth,
+                        AdventurePadThemeTokens.components.launcherAccentDark,
+                        shape,
+                    )
+                else -> Modifier
+                    .background(AdventurePadThemeTokens.colors.surfaceRaised, shape)
+                    .border(1.dp, AdventurePadThemeTokens.colors.outline, shape)
+            },
         ),
     ) {
         if (measuredSize != androidx.compose.ui.unit.IntSize.Zero) {
@@ -2210,8 +2648,16 @@ private fun StatefulSkinUtilityButton(
             )
         }
         val buttonModifier = Modifier
-            .heightIn(min = AdventurePadDesign.utilityTouchTarget)
-            .widthIn(min = 132.dp)
+            .heightIn(
+                min = if (launcherPresentation) {
+                    AdventurePadDesign.launcherControlMinimumHeight
+                } else AdventurePadDesign.utilityTouchTarget,
+            )
+            .widthIn(
+                min = if (launcherPresentation) {
+                    AdventurePadDesign.launcherControlMinimumWidth
+                } else 132.dp,
+            )
             .onSizeChanged { measuredSize = it }
             .semantics { contentDescription = label }
         if (immersive) {
@@ -2227,10 +2673,20 @@ private fun StatefulSkinUtilityButton(
             TextButton(
                 onClick = onClick,
                 interactionSource = interactionSource,
-                colors = ButtonDefaults.textButtonColors(contentColor = AdventurePadThemeTokens.colors.textSecondary),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = if (launcherPresentation) {
+                        if (pressed) AdventurePadThemeTokens.components.launcherContent
+                        else AdventurePadThemeTokens.components.launcherInk
+                    } else AdventurePadThemeTokens.colors.textSecondary,
+                ),
                 modifier = buttonModifier,
             ) {
-                Text(text = label, maxLines = 1, style = MaterialTheme.typography.labelLarge)
+                Text(
+                    text = label,
+                    maxLines = 1,
+                    fontWeight = if (launcherPresentation) FontWeight.Bold else null,
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
         }
     }
@@ -2247,6 +2703,9 @@ private fun TouchSurface(
     onButtonDown: (ScummVMMouseButton) -> Unit,
     onButtonUp: (ScummVMMouseButton) -> Unit,
     immersive: Boolean,
+    launcherPresentation: Boolean,
+    overlaySizingHeightReduction: Dp = 0.dp,
+    overlayHeightScale: Float = 1f,
     modifier: Modifier = Modifier,
 ) {
     val currentState by touchState
@@ -2254,12 +2713,30 @@ private fun TouchSurface(
     val viewConfiguration = LocalViewConfiguration.current
     val androidViewConfiguration = ViewConfiguration.get(LocalContext.current)
     val density = LocalDensity.current
+    val overlaySizingHeightReductionPx = with(density) {
+        overlaySizingHeightReduction.toPx()
+    }
     val currentButtonDown by rememberUpdatedState(onButtonDown)
     val currentButtonUp by rememberUpdatedState(onButtonUp)
     val themeColors = AdventurePadThemeTokens.colors
     val componentStyles = AdventurePadThemeTokens.components
+    val activeSkin = AdventurePadSkinTokens.current
+    val leftButtonAspectRatio = if (immersive) {
+        activeSkin?.assetAspectRatio(*SkinnableButton.LMB.artworkCandidates(pressed = false))
+    } else null
+    val rightButtonAspectRatio = if (immersive) {
+        activeSkin?.assetAspectRatio(*SkinnableButton.RMB.artworkCandidates(pressed = false))
+    } else null
     var leftButtonPressed by remember { mutableStateOf(false) }
     var rightButtonPressed by remember { mutableStateOf(false) }
+
+    LaunchedEffect(themeColors.background, componentStyles.trackpadBackground) {
+        Log.i(
+            THEME_DIAGNOSTIC_TAG,
+            "TouchSurface consumed outer=${themeColors.background.diagnosticHex()} " +
+                "trackpad=${componentStyles.trackpadBackground.diagnosticHex()}",
+        )
+    }
 
     fun dispatchOverlayTransition(transition: TrackpadOverlayButtonTransition?) {
         transition ?: return
@@ -2273,8 +2750,25 @@ private fun TouchSurface(
     Box(
         modifier = modifier
             .clip(AdventurePadThemeTokens.shapes.large)
-            .background(AdventurePadThemeTokens.components.trackpadBackground)
-            .border(1.dp, AdventurePadThemeTokens.colors.outline, AdventurePadThemeTokens.shapes.large)
+            .background(
+                if (immersive) Color.Transparent
+                else AdventurePadThemeTokens.components.trackpadBackground,
+            )
+            .then(
+                if (immersive) {
+                    Modifier
+                } else {
+                    Modifier.border(
+                        width = if (launcherPresentation) {
+                            AdventurePadDesign.launcherControlBorderWidth
+                        } else 1.dp,
+                        color = if (launcherPresentation) {
+                            AdventurePadThemeTokens.components.launcherAccentDark
+                        } else AdventurePadThemeTokens.colors.outline,
+                        shape = AdventurePadThemeTokens.shapes.large,
+                    )
+                },
+            )
             .onSizeChanged { surfaceSize ->
                 touchState.value = touchState.value.withSurfaceSize(
                     surfaceWidth = surfaceSize.width.toFloat(),
@@ -2322,12 +2816,18 @@ private fun TouchSurface(
                                 val overlayGeometry = calculateTrackpadOverlayGeometry(
                                     width = size.width.toFloat(),
                                     height = size.height.toFloat(),
+                                    sizingHeight = (size.height - overlaySizingHeightReductionPx)
+                                        .coerceAtLeast(0f),
                                     minimumHeight = with(density) {
                                         AdventurePadDesign.trackpadOverlayMinimumHeight.toPx()
                                     },
                                     maximumHeight = with(density) {
                                         AdventurePadDesign.trackpadOverlayMaximumHeight.toPx()
                                     },
+                                    leftAspectRatio = leftButtonAspectRatio,
+                                    rightAspectRatio = rightButtonAspectRatio,
+                                    sizeScale = if (immersive) IMMERSIVE_MOUSE_BUTTON_SCALE else 1f,
+                                    heightScale = overlayHeightScale,
                                 )
                                 event.changes
                                     .filter { it.pressed && !it.previousPressed }
@@ -2554,23 +3054,54 @@ private fun TouchSurface(
     ) {
         SkinArtwork(SkinSlots.TRACKPAD_SURFACE, Modifier.fillMaxSize())
         BoxWithConstraints(Modifier.fillMaxSize()) {
-            val overlayHeight = (maxHeight * TRACKPAD_OVERLAY_HEIGHT_FRACTION)
-                .coerceIn(
-                    AdventurePadDesign.trackpadOverlayMinimumHeight,
-                    AdventurePadDesign.trackpadOverlayMaximumHeight,
+            val overlayGeometry = calculateTrackpadOverlayGeometry(
+                width = constraints.maxWidth.toFloat(),
+                height = constraints.maxHeight.toFloat(),
+                sizingHeight = (constraints.maxHeight - overlaySizingHeightReductionPx)
+                    .coerceAtLeast(0f),
+                minimumHeight = with(density) {
+                    AdventurePadDesign.trackpadOverlayMinimumHeight.toPx()
+                },
+                maximumHeight = with(density) {
+                    AdventurePadDesign.trackpadOverlayMaximumHeight.toPx()
+                },
+                leftAspectRatio = leftButtonAspectRatio,
+                rightAspectRatio = rightButtonAspectRatio,
+                sizeScale = if (immersive) IMMERSIVE_MOUSE_BUTTON_SCALE else 1f,
+                heightScale = overlayHeightScale,
+            )
+            val leftButtonSize = overlayGeometry?.left?.let { bounds ->
+                with(density) { androidx.compose.ui.unit.DpSize(bounds.width.toDp(), bounds.height.toDp()) }
+            }
+            val rightButtonSize = overlayGeometry?.right?.let { bounds ->
+                with(density) { androidx.compose.ui.unit.DpSize(bounds.width.toDp(), bounds.height.toDp()) }
+            }
+            LaunchedEffect(
+                constraints.maxWidth,
+                constraints.maxHeight,
+                immersive,
+                leftButtonAspectRatio,
+                rightButtonAspectRatio,
+            ) {
+                Log.i(
+                    LAYOUT_POLISH_DIAGNOSTIC_TAG,
+                    "TouchSurface=${constraints.maxWidth}x${constraints.maxHeight} " +
+                        "immersive=$immersive intrinsicButtons=${immersive && leftButtonAspectRatio != null && rightButtonAspectRatio != null} " +
+                        "leftAspect=$leftButtonAspectRatio rightAspect=$rightButtonAspectRatio " +
+                        "left=${overlayGeometry?.left} right=${overlayGeometry?.right}",
                 )
-                .coerceAtMost(maxHeight)
+            }
             SkinArtwork(
                 SkinnableButton.LMB.artworkCandidates(leftButtonPressed),
                 Modifier.align(Alignment.BottomStart)
-                    .fillMaxWidth(TRACKPAD_OVERLAY_WIDTH_FRACTION)
-                    .height(overlayHeight),
+                    .then(leftButtonSize?.let { Modifier.size(it) } ?: Modifier),
+                preserveIntrinsicAspectRatio = immersive,
             )
             SkinArtwork(
                 SkinnableButton.RMB.artworkCandidates(rightButtonPressed),
                 Modifier.align(Alignment.BottomEnd)
-                    .fillMaxWidth(TRACKPAD_OVERLAY_WIDTH_FRACTION)
-                    .height(overlayHeight),
+                    .then(rightButtonSize?.let { Modifier.size(it) } ?: Modifier),
+                preserveIntrinsicAspectRatio = immersive,
             )
         }
         if (!immersive) Canvas(modifier = Modifier.fillMaxSize()) {
@@ -2579,57 +3110,107 @@ private fun TouchSurface(
                 height = size.height,
                 minimumHeight = AdventurePadDesign.trackpadOverlayMinimumHeight.toPx(),
                 maximumHeight = AdventurePadDesign.trackpadOverlayMaximumHeight.toPx(),
+                heightScale = overlayHeightScale,
             )
             overlayGeometry?.let { geometry ->
-                val overlayTint = componentStyles.trackpadOverlayTint
+                val leftOverlayTint = when {
+                    launcherPresentation && leftButtonPressed -> componentStyles.launcherAccentDark
+                    leftButtonPressed -> themeColors.surfacePressed
+                    else -> componentStyles.trackpadOverlayTint
+                }
+                val rightOverlayTint = when {
+                    launcherPresentation && rightButtonPressed -> componentStyles.launcherAccentDark
+                    rightButtonPressed -> themeColors.surfacePressed
+                    else -> componentStyles.trackpadOverlayTint
+                }
                 val separator = componentStyles.trackpadOverlaySeparator
-                drawRect(overlayTint, geometry.left.topLeft, geometry.left.size)
-                drawRect(overlayTint, geometry.right.topLeft, geometry.right.size)
-                drawLine(separator, geometry.left.topLeft, geometry.left.topRight, 1.dp.toPx())
-                drawLine(separator, geometry.right.topLeft, geometry.right.topRight, 1.dp.toPx())
-                drawLine(separator, geometry.left.topRight, geometry.left.bottomRight, 1.dp.toPx())
-                drawLine(separator, geometry.right.topLeft, geometry.right.bottomLeft, 1.dp.toPx())
+                val separatorWidth = if (launcherPresentation) {
+                    AdventurePadDesign.launcherTrackpadSeparatorWidth.toPx()
+                } else 1.dp.toPx()
+                val cornerRadius = CornerRadius(
+                    AdventurePadDesign.launcherMouseButtonCornerRadius.toPx(),
+                )
+                drawRoundRect(
+                    color = leftOverlayTint,
+                    topLeft = geometry.left.topLeft,
+                    size = geometry.left.size,
+                    cornerRadius = cornerRadius,
+                )
+                drawRoundRect(
+                    color = rightOverlayTint,
+                    topLeft = geometry.right.topLeft,
+                    size = geometry.right.size,
+                    cornerRadius = cornerRadius,
+                )
+                drawRoundRect(
+                    color = separator,
+                    topLeft = geometry.left.topLeft,
+                    size = geometry.left.size,
+                    cornerRadius = cornerRadius,
+                    style = Stroke(width = separatorWidth),
+                )
+                drawRoundRect(
+                    color = separator,
+                    topLeft = geometry.right.topLeft,
+                    size = geometry.right.size,
+                    cornerRadius = cornerRadius,
+                    style = Stroke(width = separatorWidth),
+                )
             }
-            val radius = MarkerRadius.toPx()
-            val unconstrainedCenter = if (currentState.cursorInitialized) {
-                Offset(currentState.cursorX, currentState.cursorY)
-            } else {
-                center
+            if (!launcherPresentation) {
+                val radius = MarkerRadius.toPx()
+                val unconstrainedCenter = if (currentState.cursorInitialized) {
+                    Offset(currentState.cursorX, currentState.cursorY)
+                } else {
+                    center
+                }
+                val markerCenter = Offset(
+                    x = unconstrainedCenter.x.coerceIn(
+                        radius,
+                        (size.width - radius).coerceAtLeast(radius),
+                    ),
+                    y = unconstrainedCenter.y.coerceIn(
+                        radius,
+                        (size.height - radius).coerceAtLeast(radius),
+                    ),
+                )
+                drawCircle(
+                    componentStyles.trackpadMarkerOutline,
+                    radius = radius + MarkerOutlineWidth.toPx(),
+                    center = markerCenter,
+                )
+                drawCircle(componentStyles.trackpadMarker, radius = radius, center = markerCenter)
             }
-            val markerCenter = Offset(
-                x = unconstrainedCenter.x.coerceIn(
-                    radius,
-                    (size.width - radius).coerceAtLeast(radius),
-                ),
-                y = unconstrainedCenter.y.coerceIn(
-                    radius,
-                    (size.height - radius).coerceAtLeast(radius),
-                ),
-            )
-            drawCircle(
-                componentStyles.trackpadMarkerOutline,
-                radius = radius + MarkerOutlineWidth.toPx(),
-                center = markerCenter,
-            )
-            drawCircle(componentStyles.trackpadMarker, radius = radius, center = markerCenter)
         }
         if (!immersive) Text(
-            text = "Left",
-            color = AdventurePadThemeTokens.colors.textSecondary,
-            fontWeight = FontWeight.Medium,
-            style = MaterialTheme.typography.labelMedium,
+            text = if (launcherPresentation) "LMB" else "Left",
+            color = if (launcherPresentation) componentStyles.launcherAccent
+            else AdventurePadThemeTokens.colors.textSecondary,
+            fontWeight = if (launcherPresentation) FontWeight.Bold else FontWeight.Medium,
+            style = if (launcherPresentation) {
+                MaterialTheme.typography.titleMedium
+            } else MaterialTheme.typography.labelMedium,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = AdventurePadDesign.spacingLg, bottom = AdventurePadDesign.spacingMd),
+                .padding(
+                    start = AdventurePadDesign.spacingLg,
+                    bottom = AdventurePadDesign.spacingMd,
+                ),
         )
         if (!immersive) Text(
-            text = "Right",
-            color = AdventurePadThemeTokens.colors.textSecondary,
-            fontWeight = FontWeight.Medium,
-            style = MaterialTheme.typography.labelMedium,
+            text = if (launcherPresentation) "RMB" else "Right",
+            color = if (launcherPresentation) componentStyles.launcherAccent
+            else AdventurePadThemeTokens.colors.textSecondary,
+            fontWeight = if (launcherPresentation) FontWeight.Bold else FontWeight.Medium,
+            style = if (launcherPresentation) {
+                MaterialTheme.typography.titleMedium
+            } else MaterialTheme.typography.labelMedium,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = AdventurePadDesign.spacingLg, bottom = AdventurePadDesign.spacingMd),
+                .padding(
+                    end = AdventurePadDesign.spacingLg,
+                    bottom = AdventurePadDesign.spacingMd,
+                ),
         )
     }
 }
@@ -4040,6 +4621,15 @@ internal enum class TouchAction(val label: String) {
 private val MarkerRadius = 16.dp
 private val MarkerOutlineWidth = 3.dp
 private val MinimumNormalTrackpadHeight = 120.dp
+internal const val IMMERSIVE_TRACKPAD_SCALE = 0.85f
+internal const val IMMERSIVE_SPLIT_TRACKPAD_EXTRA_HEIGHT_DP = 20
+internal const val IMMERSIVE_TRACKPAD_BOTTOM_GAP_DP = 8
+internal const val IMMERSIVE_UTILITY_UPWARD_OFFSET_DP = 8
+private const val IMMERSIVE_TRACKPAD_REGION_VERTICAL_PADDING_DP = 3
+private const val THEME_DIAGNOSTIC_TAG = "AdventurePadTheme"
+private const val LAYOUT_POLISH_DIAGNOSTIC_TAG = "AdventurePadLayout87"
+
+private fun Color.diagnosticHex(): String = String.format(Locale.ROOT, "#%08X", toArgb())
 private val NormalLayoutReservedHeight = 176.dp
 private const val MaxMoveEventCount = 999_999
 private const val AdventurePadBridgeTag = "AdventurePadBridge"

@@ -116,6 +116,24 @@ internal class MasterPngSkinBuilder(
                         decoded.recycle()
                     }
                 }
+                region.gameplaySafeCenter?.let { center ->
+                    val row = IntArray(output.width)
+                    var loadedY = -1
+                    val result = GameplaySafeCenterValidator.validate(center) { x, y ->
+                        if (y != loadedY) {
+                            output.getPixels(row, 0, output.width, 0, y, output.width, 1)
+                            loadedY = y
+                        }
+                        row[x] ushr 24
+                    }
+                    if (!result.isValid) {
+                        output.recycle()
+                        throw MasterPngBuildException(
+                            "The top gameplay surround must keep its central gameplay-safe area transparent. " +
+                                "Use decorative artwork on the left and right sides only.",
+                        )
+                    }
+                }
                 if (region.transparentCenter != null) {
                     if (!output.isMutable) {
                         val previous = output

@@ -2,7 +2,11 @@ package com.jamesmoran.adventurepad
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.net.Uri
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -67,6 +71,22 @@ class SkinRepositoryInstrumentedTest {
 
         assertEquals(BUILTIN_ADVENTURE_SKIN_ID, resolved.id)
         assertEquals("adventure", resolved.theme.id)
+    }
+
+    @Test
+    fun everyNativeColourThemeReachesUnskinnedGameplayResolution() {
+        repository.assignGameplaySkin(targetId, null)
+
+        AdventurePadThemes.BuiltIns.forEach { theme ->
+            val resolved = repository.resolve(
+                SkinContext.GAMEPLAY,
+                targetId,
+                defaultGameplayTheme = theme,
+            )
+
+            assertEquals(theme, resolved.theme)
+            assertFalse(resolved.supportsImmersiveGameplayArtwork())
+        }
     }
 
     @Test
@@ -152,6 +172,19 @@ class SkinRepositoryInstrumentedTest {
     }
 
     @Test
+    fun masterPngRejectsOpaqueArtworkInGameplaySafeCenter() {
+        val source = createPng("BlockedGameplay.png", 4720, 4040, clearGameplayCenter = false)
+        try {
+            val failure = assertThrows(MasterPngBuildException::class.java) {
+                repository.buildFromMasterPng(Uri.fromFile(source))
+            }
+            assertTrue(failure.message.orEmpty().contains("gameplay-safe", ignoreCase = true))
+        } finally {
+            source.delete()
+        }
+    }
+
+    @Test
     fun importingSameMasterPngAgainDoesNotOverwriteInstalledSkin() {
         val source = createPng("DuplicateRainbow.png", 4720, 4040)
         try {
@@ -222,11 +255,23 @@ class SkinRepositoryInstrumentedTest {
         }
     }
 
-    private fun createPng(name: String, width: Int, height: Int): File {
+    private fun createPng(
+        name: String,
+        width: Int,
+        height: Int,
+        clearGameplayCenter: Boolean = width == 4720 && height == 4040,
+    ): File {
         val file = File(context.cacheDir, "${System.nanoTime()}-$name")
-        Bitmap.createBitmap(width, height, Bitmap.Config.RGB_565).run {
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).run {
             try {
                 eraseColor(Color.MAGENTA)
+                if (clearGameplayCenter) {
+                    val paint = Paint().apply {
+                        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+                    }
+                    Canvas(this).drawRect(400f, 180f, 1680f, 1260f, paint)
+                    paint.xfermode = null
+                }
                 require(file.outputStream().use { compress(Bitmap.CompressFormat.PNG, 100, it) })
             } finally {
                 recycle()

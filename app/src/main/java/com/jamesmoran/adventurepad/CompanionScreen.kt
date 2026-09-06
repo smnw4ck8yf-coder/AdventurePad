@@ -3,10 +3,12 @@ package com.jamesmoran.adventurepad
 import android.database.Cursor
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -61,6 +63,7 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
@@ -107,6 +110,7 @@ internal const val WALKTHROUGH_CLOSE_LABEL = "X"
 internal const val WALKTHROUGH_TITLE_MAX_LINES = 1
 internal val WALKTHROUGH_PASTE_IME_ACTION = ImeAction.Done
 internal const val WALKTHROUGH_SETTINGS_LABEL = "Settings"
+internal val WALKTHROUGH_READER_BODY_HORIZONTAL_PADDING = 72.dp
 internal val COMPANION_BACK_ARROW_SIZE = 28.sp
 internal val WALKTHROUGH_SEARCH_ARROW_SIZE = 24.sp
 internal val WALKTHROUGH_IMPORT_PREVIEW_ORDER = listOf("SUMMARY", "ACTIONS", "PREVIEW")
@@ -116,6 +120,11 @@ private val ImmersiveSecondaryInk = Color(0xFF66503A)
 private val ImmersiveOutline = Color(0x995E452E)
 private val ImmersiveControlScrim = Color(0x38FFF4D6)
 private val ImmersiveContentEdgeFadeHeight = 24.dp
+internal const val IMMERSIVE_CLOSE_TOUCH_TARGET_DP = 72
+internal const val IMMERSIVE_CLOSE_FLAG_CENTER_OFFSET_X_DP = -13
+internal const val IMMERSIVE_CLOSE_GLYPH_SIZE_DP = 18
+internal const val IMMERSIVE_CLOSE_OUTLINE_WIDTH_DP = 3
+internal const val IMMERSIVE_CLOSE_FOREGROUND_WIDTH_DP = 2
 
 private fun Modifier.immersiveContentEdgeFade(): Modifier =
     graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
@@ -248,7 +257,10 @@ internal fun PageHeader(
             .background(
                 if (immersive && showVisuals) ImmersiveControlScrim else Color.Transparent,
             )
-            .padding(horizontal = AdventurePadDesign.contentPadding),
+            .padding(
+                start = AdventurePadDesign.contentPadding,
+                end = if (immersive) 0.dp else AdventurePadDesign.contentPadding,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (showBack) {
@@ -270,20 +282,80 @@ internal fun PageHeader(
             Spacer(Modifier.weight(1f))
         }
         if (showVisuals) {
-            TextButton(
-                onClick = onClose,
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
-                ),
-                modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
-                    .semantics { contentDescription = "Close" },
-            ) { Text(WALKTHROUGH_CLOSE_LABEL) }
+            if (immersive) {
+                ImmersiveCloseButton(description = "Close", onClick = onClose)
+            } else {
+                TextButton(
+                    onClick = onClose,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = AdventurePadThemeTokens.colors.textSecondary,
+                    ),
+                    modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget)
+                        .semantics { contentDescription = "Close" },
+                ) { Text(WALKTHROUGH_CLOSE_LABEL) }
+            }
         } else {
             InvisibleHitTarget(
                 description = "Close",
                 onClick = onClose,
                 modifier = Modifier.width(48.dp).heightIn(min = AdventurePadDesign.utilityTouchTarget),
             )
+        }
+    }
+}
+
+@Composable
+private fun ImmersiveCloseButton(
+    description: String,
+    onClick: () -> Unit,
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    LaunchedEffect(description) {
+        Log.i(
+            "AdventurePadLayout87",
+            "immersive close active description='$description' " +
+                "target=${IMMERSIVE_CLOSE_TOUCH_TARGET_DP}dp " +
+                "flagCenterOffsetX=${IMMERSIVE_CLOSE_FLAG_CENTER_OFFSET_X_DP}dp " +
+                "glyph=${IMMERSIVE_CLOSE_GLYPH_SIZE_DP}dp " +
+                "outline=${IMMERSIVE_CLOSE_OUTLINE_WIDTH_DP}dp/${IMMERSIVE_CLOSE_FOREGROUND_WIDTH_DP}dp",
+        )
+    }
+    Box(
+        modifier = Modifier
+            .width(IMMERSIVE_CLOSE_TOUCH_TARGET_DP.dp)
+            .height(IMMERSIVE_CLOSE_TOUCH_TARGET_DP.dp)
+            .offset(x = IMMERSIVE_CLOSE_FLAG_CENTER_OFFSET_X_DP.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick,
+            )
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Canvas(Modifier.width(IMMERSIVE_CLOSE_GLYPH_SIZE_DP.dp).height(IMMERSIVE_CLOSE_GLYPH_SIZE_DP.dp)) {
+            val inset = IMMERSIVE_CLOSE_OUTLINE_WIDTH_DP.dp.toPx() / 2f
+            val start = androidx.compose.ui.geometry.Offset(inset, inset)
+            val end = androidx.compose.ui.geometry.Offset(size.width - inset, size.height - inset)
+            val oppositeStart = androidx.compose.ui.geometry.Offset(size.width - inset, inset)
+            val oppositeEnd = androidx.compose.ui.geometry.Offset(inset, size.height - inset)
+            listOf(start to end, oppositeStart to oppositeEnd).forEach { (lineStart, lineEnd) ->
+                drawLine(
+                    color = Color.Black,
+                    start = lineStart,
+                    end = lineEnd,
+                    strokeWidth = IMMERSIVE_CLOSE_OUTLINE_WIDTH_DP.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+                drawLine(
+                    color = Color.White,
+                    start = lineStart,
+                    end = lineEnd,
+                    strokeWidth = IMMERSIVE_CLOSE_FOREGROUND_WIDTH_DP.dp.toPx(),
+                    cap = StrokeCap.Round,
+                )
+            }
         }
     }
 }
@@ -876,7 +948,7 @@ private fun WalkthroughReader(
                         lineHeight = (21f * preferences.textScale * preferences.lineSpacingScale).sp,
                         onTextLayout = { textLayout = it },
                         modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(
-                            horizontal = AdventurePadDesign.spacingLg,
+                            horizontal = WALKTHROUGH_READER_BODY_HORIZONTAL_PADDING,
                             vertical = AdventurePadDesign.spacingMd,
                         ),
                     )
@@ -901,7 +973,12 @@ private fun WalkthroughToolbar(
     Row(
         Modifier.fillMaxWidth()
             .background(if (immersive) ImmersiveControlScrim else Color.Transparent)
-            .padding(horizontal = AdventurePadDesign.spacingSm, vertical = AdventurePadDesign.spacingXs),
+            .padding(
+                start = AdventurePadDesign.spacingSm,
+                end = if (immersive) 0.dp else AdventurePadDesign.spacingSm,
+                top = if (immersive) 0.dp else AdventurePadDesign.spacingXs,
+                bottom = if (immersive) 0.dp else AdventurePadDesign.spacingXs,
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CompanionBackButton(
@@ -930,15 +1007,19 @@ private fun WalkthroughToolbar(
             ) { Text("⋯", fontSize = 22.sp) }
             moreContent?.invoke()
         }
-        TextButton(
-            onClick = onClose,
-            colors = ButtonDefaults.textButtonColors(
-                contentColor = if (immersive) ImmersiveSecondaryInk else AdventurePadThemeTokens.colors.textSecondary,
-            ),
-            modifier = Modifier.width(48.dp).heightIn(min = 48.dp)
-                .semantics { contentDescription = "Close walkthrough" },
-            contentPadding = PaddingValues(horizontal = AdventurePadDesign.spacingSm),
-        ) { Text(WALKTHROUGH_CLOSE_LABEL) }
+        if (immersive) {
+            ImmersiveCloseButton(description = "Close walkthrough", onClick = onClose)
+        } else {
+            TextButton(
+                onClick = onClose,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = AdventurePadThemeTokens.colors.textSecondary,
+                ),
+                modifier = Modifier.width(48.dp).heightIn(min = 48.dp)
+                    .semantics { contentDescription = "Close walkthrough" },
+                contentPadding = PaddingValues(horizontal = AdventurePadDesign.spacingSm),
+            ) { Text(WALKTHROUGH_CLOSE_LABEL) }
+        }
     }
 }
 

@@ -20,6 +20,7 @@ internal data class SkinAuthoringRegion(
     val scaleMode: SkinScaleMode,
     val sliceInsets: SkinInsets?,
     val transparentCenter: SkinTransparentCenter?,
+    val gameplaySafeCenter: SkinGameplaySafeCenter?,
 )
 
 internal data class SkinTransparentCenter(
@@ -28,6 +29,15 @@ internal data class SkinTransparentCenter(
     val width: Int,
     val height: Int,
     val requiredAlpha: Int,
+)
+
+internal data class SkinGameplaySafeCenter(
+    val x: Int,
+    val y: Int,
+    val width: Int,
+    val height: Int,
+    val ignoredAlphaAtOrBelow: Int,
+    val maxNonTransparentFraction: Double,
 )
 
 internal class SkinAuthoringSpecException(message: String) : IllegalArgumentException(message)
@@ -78,13 +88,20 @@ internal object SkinAuthoringSpecParser {
                 requiredAlpha = it.int("requiredAlpha"),
             )
         }
+        val gameplaySafeCenter = value.optionalObj("gameplaySafeCenter")?.let {
+            SkinGameplaySafeCenter(
+                x = it.int("x"), y = it.int("y"), width = it.int("width"), height = it.int("height"),
+                ignoredAlphaAtOrBelow = it.int("ignoredAlphaAtOrBelow"),
+                maxNonTransparentFraction = it.double("maxNonTransparentFraction"),
+            )
+        }
         val region = SkinAuthoringRegion(
             index = value.int("index"), slotId = slot,
             x = origin.int("x"), y = origin.int("y"),
             width = size.int("width"), height = size.int("height"),
             outputWidth = output.int("width"), outputHeight = output.int("height"),
             alphaMode = value.string("alphaMode"), scaleMode = scale,
-            sliceInsets = insets, transparentCenter = center,
+            sliceInsets = insets, transparentCenter = center, gameplaySafeCenter = gameplaySafeCenter,
         )
         specCheck(region.index > 0, "Invalid index for $slot")
         specCheck(region.x >= 0 && region.y >= 0 && region.width > 0 && region.height > 0, "Invalid crop for $slot")
@@ -98,6 +115,13 @@ internal object SkinAuthoringSpecParser {
             specCheck(it.requiredAlpha in 0..255, "Invalid requiredAlpha for $slot")
             specCheck(it.x >= 0 && it.y >= 0 && it.width > 0 && it.height > 0, "Invalid transparent center for $slot")
             specCheck(it.x + it.width <= region.outputWidth && it.y + it.height <= region.outputHeight, "Transparent center escapes $slot")
+        }
+        gameplaySafeCenter?.let {
+            specCheck(slot == SkinSlots.TOP_SURROUND, "gameplaySafeCenter is only valid for ${SkinSlots.TOP_SURROUND}")
+            specCheck(it.ignoredAlphaAtOrBelow in 0..254, "Invalid ignored alpha for $slot")
+            specCheck(it.maxNonTransparentFraction in 0.0..1.0, "Invalid gameplay-safe tolerance for $slot")
+            specCheck(it.x >= 0 && it.y >= 0 && it.width > 0 && it.height > 0, "Invalid gameplay-safe center for $slot")
+            specCheck(it.x + it.width <= region.outputWidth && it.y + it.height <= region.outputHeight, "Gameplay-safe center escapes $slot")
         }
         return region
     }
@@ -119,6 +143,9 @@ internal object SkinAuthoringSpecParser {
         specCheck(number.toDouble() == long.toDouble() && long in Int.MIN_VALUE..Int.MAX_VALUE, "$key must be an integer")
         return long.toInt()
     }
+    private fun Map<String, Any?>.double(key: String): Double =
+        (get(key) as? Number)?.toDouble()?.takeIf(Double::isFinite)
+            ?: throw SkinAuthoringSpecException("$key must be a finite number")
 
     private fun String.asEnumName(): String = replace(Regex("([a-z])([A-Z])"), "$1_$2")
         .replace('-', '_')

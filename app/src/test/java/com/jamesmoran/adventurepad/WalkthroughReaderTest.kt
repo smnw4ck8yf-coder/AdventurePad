@@ -1,6 +1,7 @@
 package com.jamesmoran.adventurepad
 
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -16,6 +17,10 @@ class WalkthroughReaderTest {
         assertEquals("X", WALKTHROUGH_CLOSE_LABEL)
         assertEquals(28f, COMPANION_BACK_ARROW_SIZE.value, 0f)
         assertEquals(24f, WALKTHROUGH_SEARCH_ARROW_SIZE.value, 0f)
+    }
+
+    @Test fun readerBodyUsesSafeHorizontalInsetForStandardAndImmersiveLayouts() {
+        assertEquals(72.dp, WALKTHROUGH_READER_BODY_HORIZONTAL_PADDING)
     }
 
     @Test fun readerActionReturnsEveryToolbarViewToReaderWithoutAScrollRequest() {

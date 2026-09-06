@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Rect
 
 internal const val TRACKPAD_OVERLAY_WIDTH_FRACTION = 0.34f
 internal const val TRACKPAD_OVERLAY_HEIGHT_FRACTION = 0.22f
+internal const val IMMERSIVE_MOUSE_BUTTON_SCALE = 1.20f
 
 internal data class TrackpadOverlayGeometry(
     val trackpadBounds: Rect,
@@ -17,23 +18,50 @@ internal fun calculateTrackpadOverlayGeometry(
     height: Float,
     minimumHeight: Float,
     maximumHeight: Float,
+    sizingHeight: Float = height,
+    leftAspectRatio: Float? = null,
+    rightAspectRatio: Float? = null,
+    sizeScale: Float = 1f,
+    heightScale: Float = 1f,
 ): TrackpadOverlayGeometry? {
     if (!width.isFinite() || !height.isFinite() || width <= 0f || height <= 0f ||
+        !sizingHeight.isFinite() || sizingHeight < 0f || sizingHeight > height ||
         !minimumHeight.isFinite() || !maximumHeight.isFinite() ||
-        minimumHeight < 0f || maximumHeight < minimumHeight
+        minimumHeight < 0f || maximumHeight < minimumHeight ||
+        !sizeScale.isFinite() || sizeScale <= 0f ||
+        !heightScale.isFinite() || heightScale <= 0f
     ) return null
 
-    val overlayHeight = (height * TRACKPAD_OVERLAY_HEIGHT_FRACTION)
+    val maximumOverlayHeight = (sizingHeight * TRACKPAD_OVERLAY_HEIGHT_FRACTION * heightScale)
         .coerceIn(minimumHeight, maximumHeight)
+        .times(sizeScale)
         .coerceAtMost(height)
-    val overlayWidth = width * TRACKPAD_OVERLAY_WIDTH_FRACTION
-    val overlayTop = height - overlayHeight
+    val maximumOverlayWidth = (width * TRACKPAD_OVERLAY_WIDTH_FRACTION * sizeScale)
+        .coerceAtMost(width / 2f)
+    val leftSize = fittedOverlaySize(maximumOverlayWidth, maximumOverlayHeight, leftAspectRatio)
+    val rightSize = fittedOverlaySize(maximumOverlayWidth, maximumOverlayHeight, rightAspectRatio)
     val bounds = Rect(0f, 0f, width, height)
     return TrackpadOverlayGeometry(
         trackpadBounds = bounds,
-        left = Rect(0f, overlayTop, overlayWidth, height),
-        right = Rect(width - overlayWidth, overlayTop, width, height),
+        left = Rect(0f, height - leftSize.second, leftSize.first, height),
+        right = Rect(width - rightSize.first, height - rightSize.second, width, height),
     )
+}
+
+private fun fittedOverlaySize(
+    maximumWidth: Float,
+    maximumHeight: Float,
+    aspectRatio: Float?,
+): Pair<Float, Float> {
+    if (aspectRatio == null || !aspectRatio.isFinite() || aspectRatio <= 0f) {
+        return maximumWidth to maximumHeight
+    }
+    val widthAtMaximumHeight = maximumHeight * aspectRatio
+    return if (widthAtMaximumHeight <= maximumWidth) {
+        widthAtMaximumHeight to maximumHeight
+    } else {
+        maximumWidth to maximumWidth / aspectRatio
+    }
 }
 
 internal enum class TrackpadInputOwner {

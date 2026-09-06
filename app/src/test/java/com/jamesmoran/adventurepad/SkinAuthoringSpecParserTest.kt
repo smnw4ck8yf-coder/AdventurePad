@@ -12,6 +12,10 @@ class SkinAuthoringSpecParserTest {
         assertEquals(SkinCanvas(4720, 4040), spec.masterCanvas)
         assertEquals(21, spec.regions.size)
         assertEquals("top.surround", spec.regions.first().slotId)
+        assertEquals(
+            SkinGameplaySafeCenter(320, 0, 1280, 1080, 32, 0.005),
+            spec.regions.first().gameplaySafeCenter,
+        )
         assertEquals(SkinTransparentCenter(64, 64, 1112, 232, 0), spec.regions.first { it.slotId == SkinSlots.PANEL_FRAME }.transparentCenter)
         listOf(
             SkinSlots.BUTTON_NOTES_NORMAL,

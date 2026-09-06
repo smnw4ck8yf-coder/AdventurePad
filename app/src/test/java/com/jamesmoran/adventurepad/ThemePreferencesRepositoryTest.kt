@@ -58,6 +58,19 @@ class ThemePreferencesRepositoryTest {
     }
 
     @Test
+    fun everyBuiltInThemeCanBeSelectedAndPersisted() = runBlocking {
+        AdventurePadThemes.BuiltIns.forEach { theme ->
+            val store = FakePersistentThemePreferencesStore()
+            withRepository(store) { repository -> repository.selectTheme(theme) }
+
+            withRepository(store) { restoredRepository ->
+                assertSame(theme, restoredRepository.activeTheme.value)
+                assertEquals(theme.id, store.persistedThemeId)
+            }
+        }
+    }
+
+    @Test
     fun unknownThemeIdFallsBackToDefault() {
         withRepository(FakePersistentThemePreferencesStore("removed-theme")) { repository ->
             assertSame(AdventurePadThemes.Default, repository.activeTheme.value)
