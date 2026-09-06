@@ -1,232 +1,109 @@
-<p align="center">
-  <img src="media/Hero.jpeg" width="750">
-</p>
-
 # AdventurePad
 
-Transform your AYN Thor into the ultimate dual-screen ScummVM handheld.
+AdventurePad is a dual-screen companion for [ScummVM](https://www.scummvm.org/) designed for the AYN Thor. It turns the second display into a launcher, relative trackpad, controls, Split View, Notes and Walkthrough companion, colour-themed interface, and immersive per-game skins.
 
-AdventurePad is a native Android companion application that transforms the AYN Thor into a true dual-screen adventure gaming device.
+![AdventurePad running an immersive skin on an AYN Thor dual-screen handheld](docs/images/immersive-pirate-skin.jpg)
 
-While ScummVM runs uninterrupted on the upper display, AdventurePad provides a dedicated lower-screen interface featuring a precision touchpad, walkthrough reader, game notes, controller shortcuts, and game-specific companion tools.
+## What it does
 
-Designed specifically for classic point-and-click adventures, AdventurePad aims to recreate the feel of a modern Nintendo DS-style experience while preserving the original ScummVM engine.
+- AdventurePad launcher and game library
+- Game artwork, Play, Resume, and Load Game actions
+- Relative touchscreen trackpad with LMB/RMB controls
+- Trackpad and Split View modes
+- Per-game Notes and Walkthrough reader
+- 15 Colour Themes, including a light Daylight theme
+- Immersive custom Skins made from one PNG
+- Per-game display, interface, and skin settings
+- Touch gestures and controller support
 
-# Current Features
-
-## Highlights
-
-- 🎮 Native dual-screen experience for the AYN Thor
-- 🖱️ Precision touchpad with controller integration
-- 📖 Built-in walkthrough reader
-- 📝 Per-game notes
-- ✂️ Adjustable split-view editor with per-game profiles
-- 🎨 Theme support and future skinning foundation
-
-## Gallery
+## Screenshots
 
 <table>
-<tr>
-<td align="center" width="50%">
-<img src="media/1.png" width="100%"><br>
-<b>🎮 Dual-Screen Gameplay</b>
-</td>
-
-<td align="center" width="50%">
-<img src="media/2.png" width="100%"><br>
-<b>✂️ Split View Editor</b>
-</td>
-</tr>
-
-<tr>
-<td align="center" width="50%">
-<img src="media/3.png" width="100%"><br>
-<b>💬 Interactive Dialogues</b>
-</td>
-
-<td align="center" width="50%">
-<img src="media/4c.png" width="100%"><br>
-<b>📖 Built-in Walkthroughs</b>
-</td>
-</tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="docs/images/launcher-library.jpg"><img src="docs/images/launcher-library.jpg" alt="AdventurePad game library and launcher controls on an AYN Thor" width="100%"></a><br>
+      <sub>Browse configured ScummVM games from the AdventurePad launcher.</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="docs/images/standard-trackpad.jpg"><img src="docs/images/standard-trackpad.jpg" alt="AdventurePad native purple trackpad interface during gameplay" width="100%"></a><br>
+      <sub>Use the lower display as a relative trackpad with dedicated mouse controls.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" width="50%">
+      <a href="docs/images/split-view.jpg"><img src="docs/images/split-view.jpg" alt="AdventurePad Split View showing complementary game areas across two displays" width="100%"></a><br>
+      <sub>Move the lower part of the game interface onto the second display.</sub>
+    </td>
+    <td align="center" width="50%">
+      <a href="docs/images/walkthrough-reader.jpg"><img src="docs/images/walkthrough-reader.jpg" alt="AdventurePad walkthrough reader below a running game on an AYN Thor" width="100%"></a><br>
+      <sub>Keep a walkthrough available on the lower display without leaving the game.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" colspan="2">
+      <a href="docs/images/colour-theme-selection.jpg"><img src="docs/images/colour-theme-selection.jpg" alt="AdventurePad Colour Theme selection dialog on an AYN Thor" width="50%"></a><br>
+      <sub>Choose from built-in Colour Themes for AdventurePad's native interface.</sub>
+    </td>
+  </tr>
 </table>
 
-## Dual Display
+## Requirements
 
-- ✅ Live mirrored ScummVM rendering on the secondary display
-- ✅ Dynamic Split View with adjustable horizontal split
-- ✅ Full-width cropped game interface rendered on the lower display
-- ✅ Independent upper game / lower interface rendering
-- ✅ Per-game Split View profiles
-- ✅ Automatic migration from legacy crop profiles
-- ✅ Persistent Split View / Trackpad mode
-- ✅ Automatic secondary display detection
-- ✅ Automatic ScummVM connection
-- ✅ Automatic mirror surface recreation after display reconnect
-- ✅ Restore Both Screens recovery
+- An **AYN Thor**, the intended and tested platform
+- Android 13 or newer
+- A second screen exposed by Android as a presentation display
+- The matching AdventurePad custom ScummVM APK
 
----
+The stock ScummVM Android app cannot replace the matching custom build: AdventurePad relies on a private, signature-protected bridge between the two APKs. Other dual-display Android devices may satisfy the same architecture, but they are unverified and unsupported. Ordinary single-screen Android devices are not supported.
 
-## Split View Editor
+## Installation
 
-- Smooth drag-to-adjust horizontal split
-- Fine adjustment controls
-- Live preview
-- Save / Cancel workflow
-- Normalized split storage
-- Versioned profile persistence
-- Per-game restoration using the ScummVM target ID
+1. Download a matching two-APK AdventurePad release.
+2. Install both the AdventurePad and custom ScummVM APKs from that release.
+3. Launch AdventurePad.
+4. Choose **Add Game** and select your legally obtained, ScummVM-compatible game data.
 
----
+AdventurePad does not include commercial games. See the [installation guide](docs/INSTALLATION.md) for updates, signing requirements, and troubleshooting.
 
-## Input
+## Custom skins
 
-### Touch
+The public workflow is deliberately simple:
 
-- Large relative touch trackpad
-- Single tap left click
-- Two-finger right click
-- Double-tap-and-hold drag
-- Dedicated Left / Right mouse buttons
+**production template → artwork → one 4720×4040 PNG → import into AdventurePad**
 
-### Controller
+Start with the [production template](skin-authoring/AdventurePad-Skin-Template-v2.png), consult the [annotated reference](skin-authoring/AdventurePad-Skin-Template-v2-reference.png), view the [completed Pirate example sheet](skin-authoring/AdventurePad-Skin-Example.png), and follow the [custom-skin guide](docs/CUSTOM_SKINS.md) or [technical reference](docs/SKIN_REFERENCE.md). The optional large editable PSD is intended for a downloadable Creator Pack rather than normal Git history.
 
-- Left stick → mouse cursor
-- A → Left click
-- B → Right click
-- Two-finger double tap shortcut for mode switching
-- L2 + R2 shortcut for Split View / Trackpad mode switching
-- Normal trigger behaviour preserved outside the shortcut
+Colour Themes style AdventurePad's native **Standard** interface. A per-game custom Skin is a separate system; choosing **Immersive** presentation can extend authored artwork across both the gameplay surround and lower interface.
 
----
+## Documentation
 
-## Cursor System
+- [Installation](docs/INSTALLATION.md)
+- [Features](docs/FEATURES.md)
+- [Custom Skins](docs/CUSTOM_SKINS.md)
+- [Skin Reference](docs/SKIN_REFERENCE.md)
+- [Building](docs/BUILDING.md)
+- [Known Limitations](docs/KNOWN_LIMITATIONS.md)
+- [Changelog](CHANGELOG.md)
+- [Licensing](#licensing)
 
-- Continuous cursor ownership across both displays
-- Cursor rendered only on its owning display
-- Upper display owns rows above the split
-- Lower display owns the split row and everything below
-- Cursor coordinates transformed correctly into the lower cropped surface
-- No duplicated cursor rendering
+## Project status
 
----
+AdventurePad is under active development and remains preview/pre-stable software. The current development source contains newer functionality than the [latest published preview release](https://github.com/smnw4ck8yf-coder/AdventurePad/releases); read a release's notes before assuming that its APKs include every feature described here.
 
-## Rendering
+## Community and feedback
 
-- Exact complementary upper/lower rendering regions
-- Aspect-ratio preserved lower interface panel
-- Dynamic panel height based on split position
-- Full-width rendering without distortion
-- Surface generation tracking
-- Safe mirror surface recreation
-- TextureView host implementation available for experimentation
-- Existing SurfaceView implementation retained
+- Report bugs or request features in [GitHub Issues](https://github.com/smnw4ck8yf-coder/AdventurePad/issues).
+- Share ideas and questions in [GitHub Discussions](https://github.com/smnw4ck8yf-coder/AdventurePad/discussions).
+- Join the community at [r/AdventurePad](https://www.reddit.com/r/AdventurePad/).
 
----
+Potential contributors are welcome to explore the source and documentation.
 
-## Reliability
+## Licensing
 
-- Robust mouse ownership system preventing duplicate DOWN / UP events
-- Generation-safe mirror attachment lifecycle
-- Safe mirror surface recreation
-- Crop generation tracking
-- Automatic recovery after display reconnects
-- Regression tests covering repeated mirror recreation
+AdventurePad-authored source code is licensed under the [Apache License 2.0](LICENSE). First-party reusable skin-authoring templates, Creator Pack documentation/art assets, and the AdventurePad Pirate example artwork are available under [CC BY 4.0](CREATOR_ASSETS_LICENSE.md).
 
----
+Those licenses do not change or override the licenses and rights that apply to ScummVM, third-party libraries, third-party assets, commercial games, screenshots, or trademarks. AdventurePad includes neutral first-party launcher title cards rather than redistributed commercial box artwork; see the [bundled artwork note](docs/BUNDLED_ARTWORK.md).
 
-# Tested
+## ScummVM relationship
 
-## Hardware
-
-- ✅ AYN Thor dual-screen Android handheld
-
-## Games
-
-- Indiana Jones and the Fate of Atlantis
-- Beneath a Steel Sky
-
----
-
-# Project Status
-
-## Milestone
-
-# ✅ Split View Milestone Complete
-
-AdventurePad now provides:
-
-- Live dual-display rendering
-- Adjustable Split View
-- Per-game split persistence
-- Independent touch trackpad
-- Controller shortcuts
-- Live lower interface rendering
-- Reliable mirror recreation
-- Hardware validation on the AYN Thor
-
-The original proof-of-concept objective has been achieved.
-
----
-
-# Known Issues
-
-### L2 + R2 after game launch
-
-Immediately after launching a game, the L2 + R2 Split View shortcut does not activate until the lower display has received focus.
-
-The shortcut also stops working if focus returns to the upper display (for example by touching the upper touchscreen).
-
-This is believed to be an Android input focus issue rather than a rendering issue.
-
-Current workaround:
-
-- Touch the lower display once.
-- L2 + R2 then functions normally.
-
-This issue is intentionally deferred for a future milestone.
-
----
-
-# Planned Work
-
-## User Experience
-
-- Adventure-themed interface
-- Improved UI polish
-- Community themes
-- Animated transitions
-
-## Gameplay
-
-- Per-game lower-screen layouts
-- Context-sensitive action panels
-- Notes system
-- Hint system
-- Two-finger scrolling
-- Additional gesture shortcuts
-
-## Technical
-
-- Resolve Android display-focus dependency for controller shortcuts
-- Evaluate TextureView vs SurfaceView performance
-- Reduce rendering latency where possible
-- Additional hardware compatibility testing
-- Upstream investigation into ScummVM integration
-
----
-
-## ❤️ Support AdventurePad
-
-AdventurePad is developed in my spare time.
-
-If you've enjoyed using it and would like to help fund future development, you can support the project here:
-
-☕ Buy me a coffee:
-https://buymeacoffee.com/YOURNAME
-
-Every contribution helps fund new features, testing hardware and ongoing development.
-
-Thank you for your support!
-
-...
+AdventurePad uses a modified ScummVM build to provide its dual-display and control bridge. [ScummVM](https://www.scummvm.org/) is a separate upstream open-source project, and AdventurePad is not an official ScummVM project. The compatible source fork currently exists alongside this project during development; its public repository link will be added when available. For the present build and integration details, see [Building AdventurePad](docs/BUILDING.md).
