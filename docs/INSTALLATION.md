@@ -23,7 +23,7 @@ Other dual-display Android devices may satisfy the implementation's display chec
 - Allow APK installation from the browser or file manager you use to open the downloads, if Android asks.
 - Supply your own legally obtained game data. AdventurePad and ScummVM do not include commercial games.
 
-The current custom ScummVM debug package can coexist with stock ScummVM because their package IDs differ. You do not need to remove stock ScummVM, but AdventurePad will ignore it and use only `org.scummvm.scummvm.debug`.
+The custom ScummVM package can coexist with stock ScummVM because their package IDs differ. Despite its historical `.debug` package suffix, the release-pair `adventurepadRelease` build is non-debuggable. You do not need to remove stock ScummVM, but AdventurePad will ignore it and use only `org.scummvm.scummvm.debug`.
 
 ## Install
 
@@ -57,11 +57,11 @@ Folder access is granted to the custom ScummVM package. A separate stock ScummVM
 
 Update both apps with the matching pair from the new release. A normal update preserves app data when package IDs and signing identities remain compatible.
 
-The public `v0.1.0-preview` used the former debug signing identity. Moving to the durable controlled release identity planned for future previews may require uninstalling and reinstalling both apps. Follow the release notes for the exact pair being installed.
+The public `v0.1.0-preview` used the former debug signing identity. Beginning with `v0.2.0-preview`, releases use the durable controlled AdventurePad signing identity. Moving from the first preview may therefore require uninstalling and reinstalling both apps. Follow the release notes for the exact pair being installed.
 
 Do not uninstall merely to update unless the release notes require it. Uninstalling can remove:
 
-- AdventurePad settings, per-game Notes and Walkthrough data, and imported skins;
+- AdventurePad settings, per-game Notes and Walkthrough data, imported skins, and custom launcher artwork;
 - the custom ScummVM configuration, default app-private saves, and persisted folder permissions.
 
 Game files stored in a separately chosen user folder are normally outside the app's private data, but their folder grant may need to be selected again. Back up important saves and use ScummVM's backup/export facility before any uninstall/reinstall migration.

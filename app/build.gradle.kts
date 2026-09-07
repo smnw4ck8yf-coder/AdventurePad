@@ -1,3 +1,18 @@
+import java.util.Properties
+
+val adventurePadSigningProperties = Properties().apply {
+    rootProject.file("local.properties").takeIf { it.isFile }?.inputStream()?.use(::load)
+}
+val adventurePadSigningKeys = listOf(
+    "ADVENTUREPAD_RELEASE_STORE_FILE",
+    "ADVENTUREPAD_RELEASE_STORE_PASSWORD",
+    "ADVENTUREPAD_RELEASE_KEY_ALIAS",
+    "ADVENTUREPAD_RELEASE_KEY_PASSWORD",
+)
+val adventurePadSigningConfigured = adventurePadSigningKeys.all {
+    !adventurePadSigningProperties.getProperty(it).isNullOrBlank()
+}
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
@@ -19,8 +34,27 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (adventurePadSigningConfigured) {
+            create("adventurePadRelease") {
+                storeFile = file(adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_STORE_FILE"))
+                storePassword = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_STORE_PASSWORD")
+                keyAlias = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_KEY_ALIAS")
+                keyPassword = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (adventurePadSigningConfigured) {
+                signingConfig = signingConfigs.getByName("adventurePadRelease")
+            }
+        }
         release {
+            if (adventurePadSigningConfigured) {
+                signingConfig = signingConfigs.getByName("adventurePadRelease")
+            }
             optimization {
                 enable = false
             }

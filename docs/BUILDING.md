@@ -2,7 +2,7 @@
 
 > [Project overview](../README.md) · [Installation](INSTALLATION.md) · [Features](FEATURES.md) · [Known Limitations](KNOWN_LIMITATIONS.md)
 
-Release signing and debug-signer migration are covered in [Release Signing Preparation](RELEASE_SIGNING.md).
+Release signing and debug-signer migration are covered in [Release Signing](RELEASE_SIGNING.md).
 
 AdventurePad consists of two source projects that produce a matching APK pair:
 
@@ -37,6 +37,7 @@ From the AdventurePad repository:
 ```sh
 ./gradlew testDebugUnitTest
 ./gradlew assembleDebug
+./gradlew assembleRelease
 ```
 
 Debug APK:
@@ -45,7 +46,7 @@ Debug APK:
 app/build/outputs/apk/debug/app-debug.apk
 ```
 
-The debug and release variants both use `com.jamesmoran.adventurepad`; no application-ID suffix is configured. No release-signing configuration currently exists, so `assembleDebug` is the verified installable developer path. The build copies the canonical skin-authoring JSON into generated app assets during `preBuild`.
+The debug and release variants both use `com.jamesmoran.adventurepad`; no application-ID suffix is configured. When all four `ADVENTUREPAD_RELEASE_*` values are present in ignored `local.properties`, both variants use the controlled release signer so they can update one another in place. Without those private values, ordinary debug builds use Android's normal developer debug signer and release output is unsigned. The build copies the canonical skin-authoring JSON into generated app assets during `preBuild`.
 
 ScummVM does not need to be built first to compile or test this project, because the bridge is implemented through Android intents, Messenger messages, permissions, and package/component names rather than a compile-time module dependency.
 
@@ -57,7 +58,7 @@ Connected-device tests, when a suitable device is available, use:
 
 ## Build the custom ScummVM APK
 
-The custom source checkout currently lives beside AdventurePad as `ScummVM-AdventurePad`. It has complete upstream history and is based on upstream ScummVM commit `4edac15aae5e1fe475eb5d4767b4c5ece3636164`, followed by 12 committed AdventurePad changes. The prepared publication candidate is the clean `adventurepad` branch at `fe5bea93fe4180489d83c4586f4aad1d086a388c`. It is the intended ScummVM source counterpart for AdventurePad `v0.2.0-preview`; this integration label does not replace or invent an upstream ScummVM semantic version.
+The custom source checkout currently lives beside AdventurePad as `ScummVM-AdventurePad`. It has complete upstream history and is based on upstream ScummVM commit `4edac15aae5e1fe475eb5d4767b4c5ece3636164`, followed by AdventurePad-specific commits. The intended ScummVM source counterpart for `v0.2.0-preview` is the `adventurepad` branch revision recorded by the release tag or release notes, including the tracked `adventurepadRelease` build configuration. This integration label does not replace or invent an upstream ScummVM semantic version.
 
 ### Reproducibility limitation
 
@@ -111,20 +112,30 @@ cd android_project
 
 repackages the already generated project and existing native library. It compiles current Android Java sources through `src.properties`, but it does **not** rebuild changed ScummVM C++ code. Use the configure/make path for a true source build.
 
+After generating `android_project`, the package-preserving, non-debuggable AdventurePad release variant can be packaged without rebuilding unchanged native code:
+
+```sh
+cd android_project
+./gradlew assembleAdventurepadRelease
+```
+
+When all four `ADVENTUREPAD_RELEASE_*` values are present in the generated project's ignored `local.properties`, the debug and `adventurepadRelease` variants use the controlled AdventurePad signer. Without them, debug uses Android's normal developer signer and `adventurepadRelease` output is unsigned.
+
 ### Variants and package IDs
 
-- Debug APK: `org.scummvm.scummvm.debug`
-- Release variant: `org.scummvm.scummvm`
+- Debug APK: `org.scummvm.scummvm.debug` (debuggable)
+- AdventurePad release APK: `org.scummvm.scummvm.debug` (non-debuggable)
+- Stock-compatible release variant: `org.scummvm.scummvm` (non-debuggable and separate from AdventurePad)
 
-AdventurePad currently binds specifically to the debug package. Therefore, build and install the ScummVM **debug** variant for the current architecture. The release variant would collide with official ScummVM and would not satisfy AdventurePad's hard-coded component target.
+AdventurePad binds specifically to `org.scummvm.scummvm.debug`. Public release pairs must therefore use **`adventurepadRelease`**, which preserves that package ID while inheriting release optimization and non-debuggable behavior. The ordinary `release` variant uses `org.scummvm.scummvm`, can collide with official ScummVM, and does not satisfy AdventurePad's hard-coded component target.
 
 ## Signing the pair
 
-Neither project defines a shared release-signing configuration. Android's Gradle plugin signs debug builds with the developer machine's default debug identity. When both projects are built by the same user on the same machine, they receive the same certificate and their signature-protected cross-app permissions work.
+Both tracked Gradle configurations can read the same four optional `ADVENTUREPAD_RELEASE_*` values from their respective ignored `local.properties` files. No keystore path or credential is stored in Git. With those values configured, AdventurePad's debug/release variants and ScummVM's debug/`adventurepadRelease` variants use the same controlled identity required by their signature-protected bridge.
 
 Different machines normally have different debug certificates. Building one half elsewhere can produce a pair that cannot use the protected bridge, and it cannot update an installation signed by James's current debug certificate.
 
-A future public release process must sign both APKs with one durable controlled release identity. The Android debug certificate is not an acceptable release-signing identity. Do not commit keystores, passwords, signing properties, or machine-specific paths. See [Release Signing Preparation](RELEASE_SIGNING.md).
+Without private release properties, Android's normal developer signer may still be used for local debug pairs, but those builds are not release artifacts and cannot update permanent-signed installations. Do not commit keystores, passwords, signing properties, or machine-specific paths. See [Release Signing](RELEASE_SIGNING.md).
 
 Install a locally built matching pair with:
 
