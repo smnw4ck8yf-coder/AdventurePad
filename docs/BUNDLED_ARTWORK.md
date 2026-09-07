@@ -1,6 +1,13 @@
 # Bundled Launcher Artwork
 
-AdventurePad's launcher artwork resolver checks `app/src/main/assets/artwork/<target-or-game-id>/box.png` and falls back to the launcher's generic placeholder when no matching asset exists.
+AdventurePad's launcher artwork resolver checks, in order:
+
+1. User-imported artwork for the exact ScummVM target ID in app-private `files/custom_artwork/` storage.
+2. `app/src/main/assets/artwork/<target-id>/box.png`.
+3. `app/src/main/assets/artwork/<canonical-game-id>/box.png`.
+4. The launcher's generic placeholder when no image can be decoded.
+
+The game-card context menu lets a user set, replace, or explicitly remove a custom image. AdventurePad accepts PNG, JPEG, and WEBP through Android's document picker, validates the selected image, and copies it into app-private storage. It does not retain or depend on the selected document URI. Removing a configured ScummVM game does not remove its custom artwork, so adding the same target ID again restores the override.
 
 For the `v0.2.0-preview` publication preparation, all 20 previously bundled commercial box-cover images were removed and replaced at the same paths with first-party neutral AdventurePad title cards. The replacements use only an original geometric AdventurePad treatment and plain game-title text. They contain no screenshots, copied packaging, publisher/developer logos, characters, or downloaded imagery.
 

@@ -1,6 +1,7 @@
 package com.jamesmoran.adventurepad
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 class ArtworkResolverTest {
@@ -35,5 +36,21 @@ class ArtworkResolverTest {
     fun sampleSizeUsesPowersOfTwoWithoutUndersizing() {
         assertEquals(2, ArtworkResolver.calculateSampleSize(sourceWidth = 600, requestedWidth = 224))
         assertEquals(1, ArtworkResolver.calculateSampleSize(sourceWidth = 600, requestedWidth = 301))
+    }
+
+    @Test
+    fun customArtworkFileNameIsDeterministicallyKeyedByExactTargetId() {
+        assertEquals(
+            "aW5keTMtZm0.artwork",
+            CustomArtworkRepository.artworkFileName("indy3-fm"),
+        )
+        assertEquals(
+            CustomArtworkRepository.artworkFileName("indy3-fm"),
+            CustomArtworkRepository.artworkFileName("indy3-fm"),
+        )
+        assertNotEquals(
+            CustomArtworkRepository.artworkFileName("indy3-fm"),
+            CustomArtworkRepository.artworkFileName("indy3"),
+        )
     }
 }

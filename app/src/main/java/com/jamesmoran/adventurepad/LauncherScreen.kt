@@ -1,6 +1,9 @@
 package com.jamesmoran.adventurepad
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -49,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -92,6 +96,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import kotlin.math.roundToInt
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadDesign
 import com.jamesmoran.adventurepad.ui.theme.AdventurePadThemeTokens
+import kotlinx.coroutines.launch
 
 @Composable
 internal fun AdventurePadLauncherScreen(
@@ -110,8 +115,38 @@ internal fun AdventurePadLauncherScreen(
     val context = LocalContext.current
     val density = LocalDensity.current
     val artworkWidthPx = with(density) { AdventurePadDesign.launcherGameCardWidth.roundToPx() }
-    val artworkResolver = remember(context.applicationContext, artworkWidthPx) {
-        ArtworkResolver.create(context, artworkWidthPx)
+    val customArtworkRepository = remember(context.applicationContext) {
+        CustomArtworkRepository.create(context)
+    }
+    val artworkResolver = remember(context.applicationContext, artworkWidthPx, customArtworkRepository) {
+        ArtworkResolver.create(context, artworkWidthPx, customArtworkRepository)
+    }
+    val scope = rememberCoroutineScope()
+    val artworkVersions = remember { mutableStateMapOf<String, Int>() }
+    var pendingArtworkTargetId by rememberSaveable { mutableStateOf<String?>(null) }
+    val artworkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val targetId = pendingArtworkTargetId
+        pendingArtworkTargetId = null
+        if (uri != null && targetId != null) {
+            scope.launch {
+                val result = runCatching {
+                    val input = context.contentResolver.openInputStream(uri)
+                        ?: throw CustomArtworkException("AdventurePad could not open that image.")
+                    customArtworkRepository.import(targetId, input)
+                }
+                result.onSuccess {
+                    artworkResolver.invalidateCustomArtwork(targetId)
+                    artworkVersions[targetId] = (artworkVersions[targetId] ?: 0) + 1
+                    Toast.makeText(context, "Custom artwork saved.", Toast.LENGTH_SHORT).show()
+                }.onFailure { error ->
+                    Toast.makeText(
+                        context,
+                        error.message ?: "AdventurePad could not read that image.",
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
+            }
+        }
     }
     var sortMode by rememberSaveable { mutableStateOf(LauncherSortMode.MANUAL) }
     var editingOrder by rememberSaveable { mutableStateOf(false) }
@@ -256,11 +291,16 @@ internal fun AdventurePadLauncherScreen(
                             GameBox(
                                 target = target,
                                 artworkResolver = artworkResolver,
+                                customArtworkVersion = artworkVersions[target.targetId] ?: 0,
                                 editingOrder = reorderEnabled,
                                 onBoundsChanged = { cardBounds[target.targetId] = it },
                                 onDisposed = { cardBounds.remove(target.targetId) },
                                 onOpenContextMenu = { bounds ->
-                                    openMenu = LauncherMenu.Context(target, bounds)
+                                    openMenu = LauncherMenu.Context(
+                                        target,
+                                        bounds,
+                                        artworkResolver.hasCustomArtwork(target.targetId),
+                                    )
                                 },
                                 modifier = Modifier
                                     .animateItem()
@@ -347,7 +387,11 @@ internal fun AdventurePadLauncherScreen(
                 editingOrder = editingOrder,
                 onDismiss = { openMenu = null },
                 onReplaceContext = { target, bounds ->
-                    openMenu = LauncherMenu.Context(target, bounds)
+                    openMenu = LauncherMenu.Context(
+                        target,
+                        bounds,
+                        artworkResolver.hasCustomArtwork(target.targetId),
+                    )
                 },
                 onReplaceSort = { bounds -> openMenu = LauncherMenu.Sort(bounds) },
                 onSortModeChanged = { selected ->
@@ -366,6 +410,28 @@ internal fun AdventurePadLauncherScreen(
                 onLoadTarget = { target ->
                     openMenu = null
                     onLoadTarget(target)
+                },
+                onSetCustomArtwork = { target ->
+                    openMenu = null
+                    pendingArtworkTargetId = target.targetId
+                    artworkPicker.launch(arrayOf("image/png", "image/jpeg", "image/webp"))
+                },
+                onRemoveCustomArtwork = { target ->
+                    openMenu = null
+                    scope.launch {
+                        if (customArtworkRepository.remove(target.targetId)) {
+                            artworkResolver.invalidateCustomArtwork(target.targetId)
+                            artworkVersions[target.targetId] =
+                                (artworkVersions[target.targetId] ?: 0) + 1
+                            Toast.makeText(context, "Custom artwork removed.", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(
+                                context,
+                                "AdventurePad could not remove the custom artwork.",
+                                Toast.LENGTH_LONG,
+                            ).show()
+                        }
+                    }
                 },
                 onRemoveTarget = { target ->
                     openMenu = null
@@ -484,6 +550,7 @@ private sealed interface LauncherMenu {
     data class Context(
         val target: ScummVMTarget,
         override val anchorBounds: Rect,
+        val hasCustomArtwork: Boolean,
     ) : LauncherMenu
 }
 
@@ -502,6 +569,8 @@ private fun LauncherMenuLayer(
     onLaunchTarget: (ScummVMTarget) -> Unit,
     onResumeTarget: (ScummVMTarget) -> Unit,
     onLoadTarget: (ScummVMTarget) -> Unit,
+    onSetCustomArtwork: (ScummVMTarget) -> Unit,
+    onRemoveCustomArtwork: (ScummVMTarget) -> Unit,
     onRemoveTarget: (ScummVMTarget) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -509,7 +578,7 @@ private fun LauncherMenuLayer(
     val menuWidth = 260.dp
     val menuWidthPx = with(density) { menuWidth.toPx() }
     val estimatedHeightPx = with(density) {
-        (if (menu is LauncherMenu.Sort) 144.dp else 224.dp).toPx()
+        (if (menu is LauncherMenu.Sort) 144.dp else 352.dp).toPx()
     }
     val anchor = menu.anchorBounds
     val x = anchor.left.coerceIn(0f, (rootSize.width - menuWidthPx).coerceAtLeast(0f))
@@ -605,6 +674,23 @@ private fun LauncherMenuLayer(
                             enabled = !editingOrder && menu.target.loadGameAvailable,
                             onClick = { onLoadTarget(menu.target) },
                         )
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    if (menu.hasCustomArtwork) "Replace Custom Artwork"
+                                    else "Set Custom Artwork",
+                                )
+                            },
+                            enabled = !editingOrder,
+                            onClick = { onSetCustomArtwork(menu.target) },
+                        )
+                        if (menu.hasCustomArtwork) {
+                            DropdownMenuItem(
+                                text = { Text("Remove Custom Artwork") },
+                                enabled = !editingOrder,
+                                onClick = { onRemoveCustomArtwork(menu.target) },
+                            )
+                        }
                         DropdownMenuItem(
                             text = { Text("Remove Game") },
                             enabled = !editingOrder,
@@ -954,6 +1040,7 @@ private fun LauncherBrand(compact: Boolean, modifier: Modifier = Modifier) {
 private fun GameBox(
     target: ScummVMTarget,
     artworkResolver: ArtworkResolver,
+    customArtworkVersion: Int,
     editingOrder: Boolean,
     onBoundsChanged: (Rect) -> Unit,
     onDisposed: () -> Unit,
@@ -972,10 +1059,11 @@ private fun GameBox(
     val currentOnDrag by rememberUpdatedState(onDrag)
     val currentOnDragFinished by rememberUpdatedState(onDragFinished)
     val artwork by produceState<ImageBitmap?>(
-        initialValue = null,
-        key1 = target.targetId,
-        key2 = target.gameId,
-        key3 = artworkResolver,
+        null,
+        target.targetId,
+        target.gameId,
+        artworkResolver,
+        customArtworkVersion,
     ) {
         value = artworkResolver.resolve(target.targetId, target.gameId)
     }
