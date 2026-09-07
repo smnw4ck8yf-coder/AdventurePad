@@ -11,6 +11,7 @@ AdventurePad reads configured targets from the matching custom ScummVM app and p
 - **Load Game** through ScummVM's save chooser.
 - **Remove Game** from the ScummVM configuration. This does not delete game data or save files.
 - **Add Game** through ScummVM's game-detection and folder-selection flow.
+- **Set Custom Artwork** for a game card using a PNG, JPEG, or WEBP image. Imported artwork is copied into AdventurePad's private storage and can be replaced or removed from the same context menu.
 
 The library supports **Manual**, **Alphabetical**, and **Recently Played** sorting. Manual order and launch timestamps persist. The selected sort mode itself is currently screen state and should not be expected to survive process death.
 
@@ -131,5 +132,6 @@ It persists these settings per game where applicable:
 - Split View crop
 - Notes
 - Walkthrough document, reading position, and reader preferences
+- Custom launcher artwork, keyed by the exact ScummVM target ID
 
 See also: [Installation](INSTALLATION.md) · [Known Limitations](KNOWN_LIMITATIONS.md)

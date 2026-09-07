@@ -7,7 +7,7 @@ AdventurePad is a dual-screen companion for [ScummVM](https://www.scummvm.org/) 
 ## What it does
 
 - AdventurePad launcher and game library
-- Game artwork, Play, Resume, and Load Game actions
+- Neutral bundled game artwork, private user-managed artwork overrides, and Play, Resume, and Load Game actions
 - Relative touchscreen trackpad with LMB/RMB controls
 - Trackpad and Split View modes
 - Per-game Notes and Walkthrough reader
