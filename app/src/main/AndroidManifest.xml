@@ -13,6 +13,7 @@
 
     <queries>
         <package android:name="org.scummvm.scummvm.debug" />
+        <package android:name="rip.moth.cocoonshell" />
     </queries>
 
     <application
@@ -56,6 +57,12 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".CocoonIntegrationActivity"
+            android:exported="false"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.AdventurePad"
+            android:windowSoftInputMode="adjustResize" />
         <!-- A distinct affinity makes the trackpad an independently recoverable task. -->
         <activity
             android:name=".TrackpadActivity"

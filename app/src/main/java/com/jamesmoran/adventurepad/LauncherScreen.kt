@@ -109,6 +109,7 @@ internal fun AdventurePadLauncherScreen(
     onAddGame: () -> Unit,
     onRemoveTarget: (ScummVMTarget) -> Unit,
     onOpenAdvancedScummVM: () -> Unit,
+    onOpenCocoonIntegration: () -> Unit,
     onManualOrderChanged: (List<String>) -> Unit,
 ) {
     val palette = AdventurePadThemeTokens.components
@@ -227,6 +228,7 @@ internal fun AdventurePadLauncherScreen(
                 editingOrder = editingOrder,
                 onAddGame = onAddGame,
                 onSettings = onOpenAdvancedScummVM,
+                onCocoonSetup = onOpenCocoonIntegration,
                 onSortBoundsChanged = { sortBounds = it },
                 onOpenSortMenu = { bounds -> openMenu = LauncherMenu.Sort(bounds) },
                 onEditingOrderChanged = { editingOrder = it },
@@ -837,6 +839,7 @@ private fun LauncherHeader(
     editingOrder: Boolean,
     onAddGame: () -> Unit,
     onSettings: () -> Unit,
+    onCocoonSetup: () -> Unit,
     onSortBoundsChanged: (Rect) -> Unit,
     onOpenSortMenu: (Rect) -> Unit,
     onEditingOrderChanged: (Boolean) -> Unit,
@@ -873,7 +876,21 @@ private fun LauncherHeader(
                         )
                     }
                 } else {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onCocoonSetup,
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = palette.launcherContent,
+                                contentColor = palette.launcherInk,
+                            ),
+                            border = BorderStroke(2.dp, palette.launcherAccentDark),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text("Cocoon Setup", fontWeight = FontWeight.Bold)
+                        }
                         OutlinedButton(
                             onClick = onSettings,
                             colors = ButtonDefaults.outlinedButtonColors(

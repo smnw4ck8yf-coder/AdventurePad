@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
                         onAddGame = ::addGame,
                         onRemoveTarget = ::removeTarget,
                         onOpenAdvancedScummVM = ::openAdvancedScummVM,
+                        onOpenCocoonIntegration = ::openCocoonIntegration,
                         onManualOrderChanged = { order ->
                             lifecycleScope.launch {
                                 launcherLibraryMetadataRepository.setManualOrder(order)
@@ -172,6 +173,10 @@ class MainActivity : ComponentActivity() {
         if (!libraryClient.openAdvancedScummVM()) {
             Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
         }
+    }
+
+    private fun openCocoonIntegration() {
+        startActivity(Intent(this, CocoonIntegrationActivity::class.java))
     }
 
     private fun addGame() {

@@ -1,0 +1,42 @@
+diff --git a/platforms/ScummVM.json b/platforms/ScummVM.json
+index bb2a711..b9f2800 100644
+--- a/platforms/ScummVM.json
++++ b/platforms/ScummVM.json
+@@ -1,6 +1,6 @@
+ {
+   "databaseVersion": 14,
+-  "revisionNumber": 4,
++  "revisionNumber": 5,
+   "platform": {
+     "name": "ScummVM",
+     "uniqueId": "scummvm",
+@@ -30,6 +30,16 @@
+       "killPackageProcessesWarning": true,
+       "extra": ""
+     },
++    {
++      "name": "AdventurePad",
++      "uniqueId": "scummvm.com.jamesmoran.adventurepad",
++      "description": "Supported extensions: dpt. Requires AdventurePad.",
++      "acceptedFilenameRegex": "^(.*)\\.(?:dpt)$",
++      "amStartArguments": "-n com.jamesmoran.adventurepad/com.jamesmoran.adventurepad.ExternalGameLaunchActivity\n -a com.jamesmoran.adventurepad.action.LAUNCH_SCUMMVM_TARGET\n -e com.jamesmoran.adventurepad.extra.TARGET_ID {tags.scummvm_id}",
++      "killPackageProcesses": false,
++      "killPackageProcessesWarning": false,
++      "extra": ""
++    },
+     {
+       "name": "ScummVM (Debug Build)",
+       "uniqueId": "scummvm.org.scummvm.scummvm.debug",
+diff --git a/platforms/index.json b/platforms/index.json
+index 4f34ff7..e0051ea 100644
+--- a/platforms/index.json
++++ b/platforms/index.json
+@@ -580,7 +580,7 @@
+       "platformName": "ScummVM",
+       "platformShortname": "scummvm",
+       "platformUniqueId": "scummvm",
+-      "revisionNumber": 4
++      "revisionNumber": 5
+     },
+     {
+       "filename": "Sega32X.json",

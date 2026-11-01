@@ -6,6 +6,9 @@
    See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
+    <!-- Cocoon ownership is specific to one user-selected SAF tree and must not migrate. -->
+    <exclude domain="file" path="cocoon-integration/" />
+    <exclude domain="sharedpref" path="cocoon_integration.xml" />
     <!--
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>

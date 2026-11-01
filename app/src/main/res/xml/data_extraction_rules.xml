@@ -4,7 +4,15 @@
    for details.
 -->
 <data-extraction-rules>
-    <cloud-backup />
+    <cloud-backup>
+        <!-- SAF grants do not migrate; never transfer ownership claims without their tree. -->
+        <exclude domain="file" path="cocoon-integration/" />
+        <exclude domain="sharedpref" path="cocoon_integration.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="cocoon-integration/" />
+        <exclude domain="sharedpref" path="cocoon_integration.xml" />
+    </device-transfer>
     <!--
     <device-transfer>
         <include .../>
