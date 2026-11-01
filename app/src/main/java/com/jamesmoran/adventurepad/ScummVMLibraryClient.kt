@@ -69,6 +69,8 @@ internal class ScummVMLibraryClient(
     context: Context,
     private val onStateChanged: (ScummVMLibraryState) -> Unit,
     private val onGameRemovalResult: (ScummVMGameRemovalResult) -> Unit = {},
+    private val onActiveTargetChanged: (String) -> Unit = {},
+    private val refreshSaveCapabilitiesOnConnect: Boolean = true,
 ) {
     private val applicationContext = context.applicationContext
     private var remote: Messenger? = null
@@ -78,6 +80,12 @@ internal class ScummVMLibraryClient(
 
     private val replyMessenger = Messenger(object : Handler(Looper.getMainLooper()) {
         override fun handleMessage(message: Message) {
+            if (message.what == MirrorSurfaceProtocol.MSG_GEOMETRY) {
+                onActiveTargetChanged(
+                    message.data.getString(MirrorSurfaceProtocol.KEY_GAME_ID).orEmpty(),
+                )
+                return
+            }
             if (message.what == MSG_REMOVE_GAME_RESULT) {
                 val data = message.data
                 onGameRemovalResult(
@@ -121,10 +129,11 @@ internal class ScummVMLibraryClient(
             remote = Messenger(service)
             updateState(state.copy(connected = true, loading = true, error = null))
             refresh()
-            requestSaveCapabilityRefresh()
+            if (refreshSaveCapabilitiesOnConnect) requestSaveCapabilityRefresh()
         }
 
-        override fun onServiceDisconnected(name: ComponentName) = disconnect("ScummVM disconnected")
+        override fun onServiceDisconnected(name: ComponentName) =
+            markRemoteDisconnected("ScummVM disconnected")
         override fun onBindingDied(name: ComponentName) = disconnect("ScummVM bridge stopped")
         override fun onNullBinding(name: ComponentName) = disconnect("ScummVM bridge unavailable")
     }
@@ -157,6 +166,8 @@ internal class ScummVMLibraryClient(
     }
 
     fun refresh(): Boolean = send(MSG_QUERY_GAME_LIBRARY)
+
+    fun queryActiveTarget(): Boolean = send(MirrorSurfaceProtocol.MSG_QUERY_GEOMETRY)
 
     private fun requestSaveCapabilityRefresh(): Boolean =
         saveCapabilityRefreshGate.requestOnce { send(MSG_REFRESH_SAVE_CAPABILITIES) }
@@ -207,6 +218,13 @@ internal class ScummVMLibraryClient(
     private fun disconnect(error: String) {
         remote = null
         bound = false
+        saveCapabilityRefreshGate.reset()
+        updateState(state.copy(connected = false, loading = false, error = error))
+    }
+
+    /** Android retains this binding and reconnects it after a remote process restart. */
+    private fun markRemoteDisconnected(error: String) {
+        remote = null
         saveCapabilityRefreshGate.reset()
         updateState(state.copy(connected = false, loading = false, error = error))
     }

@@ -43,6 +43,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".ExternalGameLaunchActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="com.jamesmoran.adventurepad.action.LAUNCH_SCUMMVM_TARGET" />
+
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
         <!-- A distinct affinity makes the trackpad an independently recoverable task. -->
         <activity
             android:name=".TrackpadActivity"
