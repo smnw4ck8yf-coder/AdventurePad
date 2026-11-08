@@ -129,7 +129,7 @@ jobs:
           cp ScummVM-AdventurePad/COPYING release/SCUMMVM-COPYING.txt
           cp ScummVM-AdventurePad/COPYRIGHT release/SCUMMVM-COPYRIGHT.txt
           cp "$RUNNER_TEMP/scummvm-deps/src/oboe/LICENSE" release/OBOE-LICENSE.txt
-          cp "$RUNNER_TEMP/scummvm-deps/src/libpng/LICENSE.md" release/LIBPNG-LICENSE.md
+          cp "$RUNNER_TEMP/scummvm-deps/src/libpng/LICENSE" release/LIBPNG-LICENSE.txt
           cp "$RUNNER_TEMP/scummvm-deps/src/flac/COPYING.Xiph" release/FLAC-COPYING.txt
           git -C ScummVM-AdventurePad archive --format=tar.gz \
             --output="$GITHUB_WORKSPACE/release/ScummVM-AdventurePad-source-${{ steps.pairing.outputs.revision }}.tar.gz" HEAD
