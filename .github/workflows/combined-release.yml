@@ -58,21 +58,58 @@ jobs:
             --with-png-prefix="$RUNNER_TEMP/scummvm-deps/libpng-prefix-arm64"
           make -j"$(nproc)" ScummVM-debug.apk
 
-      - name: Decode release keystore
+      - name: Prepare release signing
         shell: bash
         env:
           ADVENTUREPAD_RELEASE_KEYSTORE_BASE64: ${{ secrets.ADVENTUREPAD_RELEASE_KEYSTORE_BASE64 }}
-        run: echo "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/adventurepad-release.jks"
+          ADVENTUREPAD_RELEASE_STORE_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_STORE_PASSWORD }}
+          ADVENTUREPAD_RELEASE_KEY_ALIAS: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_ALIAS }}
+          ADVENTUREPAD_RELEASE_KEY_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_PASSWORD }}
+        run: |
+          signing_values=(
+            "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64"
+            "$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
+            "$ADVENTUREPAD_RELEASE_KEY_ALIAS"
+            "$ADVENTUREPAD_RELEASE_KEY_PASSWORD"
+          )
+          configured=0
+          for value in "${signing_values[@]}"; do
+            if [[ -n "$value" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+
+          if [[ "$configured" -eq "${#signing_values[@]}" ]]; then
+            echo "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/adventurepad-release.jks"
+          elif [[ "$configured" -eq 0 ]]; then
+            ADVENTUREPAD_RELEASE_STORE_PASSWORD=adventurepad-test
+            ADVENTUREPAD_RELEASE_KEY_ALIAS=adventurepad-test
+            ADVENTUREPAD_RELEASE_KEY_PASSWORD=adventurepad-test
+            keytool -genkeypair \
+              -keystore "$RUNNER_TEMP/adventurepad-release.jks" \
+              -storepass "$ADVENTUREPAD_RELEASE_STORE_PASSWORD" \
+              -alias "$ADVENTUREPAD_RELEASE_KEY_ALIAS" \
+              -keypass "$ADVENTUREPAD_RELEASE_KEY_PASSWORD" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 365 \
+              -dname 'CN=AdventurePad Test Build, OU=Testing, O=AdventurePad, L=London, C=GB'
+          else
+            echo "Release signing secrets are only partially configured" >&2
+            exit 1
+          fi
+
+          {
+            echo "ADVENTUREPAD_RELEASE_STORE_FILE=$RUNNER_TEMP/adventurepad-release.jks"
+            echo "ADVENTUREPAD_RELEASE_STORE_PASSWORD=$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
+            echo "ADVENTUREPAD_RELEASE_KEY_ALIAS=$ADVENTUREPAD_RELEASE_KEY_ALIAS"
+            echo "ADVENTUREPAD_RELEASE_KEY_PASSWORD=$ADVENTUREPAD_RELEASE_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
 
       - name: Test standalone AdventurePad
         run: ./gradlew testDebugUnitTest assembleDebug
 
       - name: Build signed combined release
-        env:
-          ADVENTUREPAD_RELEASE_STORE_FILE: ${{ runner.temp }}/adventurepad-release.jks
-          ADVENTUREPAD_RELEASE_STORE_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_STORE_PASSWORD }}
-          ADVENTUREPAD_RELEASE_KEY_ALIAS: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_ALIAS }}
-          ADVENTUREPAD_RELEASE_KEY_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_PASSWORD }}
         run: |
           test -s "$ADVENTUREPAD_RELEASE_STORE_FILE"
           test -n "$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
