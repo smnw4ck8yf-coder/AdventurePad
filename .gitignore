@@ -9,6 +9,7 @@
 /.idea/assetWizardSettings.xml
 .DS_Store
 /build
+/scummvm-engine/build
 /captures
 .externalNativeBuild
 .cxx

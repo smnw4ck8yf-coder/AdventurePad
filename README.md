@@ -52,16 +52,18 @@ AdventurePad is a dual-screen companion for [ScummVM](https://www.scummvm.org/) 
 - An **AYN Thor**, the intended and tested platform
 - Android 13 or newer
 - A second screen exposed by Android as a presentation display
-- The matching AdventurePad custom ScummVM APK
+- A combined AdventurePad APK, or the matching custom ScummVM APK for legacy two-app development builds
 
-The stock ScummVM Android app cannot replace the matching custom build: AdventurePad relies on a private, signature-protected bridge between the two APKs. Other dual-display Android devices may satisfy the same architecture, but they are unverified and unsupported. Ordinary single-screen Android devices are not supported.
+The stock ScummVM Android app cannot replace the matching custom engine. Combined distribution builds bundle that engine in AdventurePad; standalone development builds retain the private, signature-protected two-app bridge. Other dual-display Android devices may satisfy the same architecture, but they are unverified and unsupported. Ordinary single-screen Android devices are not supported.
 
 ## Installation
 
-1. Download a matching two-APK AdventurePad release.
-2. Install both the AdventurePad and custom ScummVM APKs from that release.
-3. Launch AdventurePad.
-4. Choose **Add Game** and select your legally obtained, ScummVM-compatible game data.
+1. Download the combined AdventurePad APK.
+2. Install it and launch AdventurePad.
+3. Choose **Add Game** and select your legally obtained, ScummVM-compatible game data.
+
+Legacy development builds may still be installed as a matching two-APK pair so
+AdventurePad and ScummVM-AdventurePad can be built and debugged independently.
 
 AdventurePad does not include commercial games. See the [installation guide](docs/INSTALLATION.md) for updates, signing requirements, and troubleshooting.
 

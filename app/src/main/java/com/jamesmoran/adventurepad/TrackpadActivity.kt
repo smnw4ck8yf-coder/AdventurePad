@@ -149,6 +149,16 @@ class TrackpadActivity : ComponentActivity() {
     private var cropTargetHandoffJob: Job? = null
     private var companionTargetId by mutableStateOf("")
     private var lowerSkinContext by mutableStateOf(SkinContext.GAMEPLAY)
+    private val externalGameReturnHandoff = ExternalGameReturnHandoffStateMachine()
+    private var externalGameReturnConfirmation: Runnable? = null
+    private val lowerDisplayTaskOwner = object : LowerDisplayTaskOwner {
+        override fun ownershipState() = LowerDisplayOwnershipState(
+            skinContext = lowerSkinContext,
+            activeTargetId = mirrorSourceGeometry?.gameId,
+        )
+
+        override fun moveTaskToBackground(): Boolean = moveTaskToBack(true)
+    }
     private var mirrorCursorState by mutableStateOf(MirrorCursorState())
     private var cropEditorModel by mutableStateOf<CropEditorModel?>(null)
     private var cropEditorVisible by mutableStateOf(false)
@@ -197,6 +207,13 @@ class TrackpadActivity : ComponentActivity() {
             requestedContext = intent.skinContextOr(SkinContext.GAMEPLAY),
             cachedTargetId = null,
         )
+        savedInstanceState?.getString(STATE_EXTERNAL_RETURN_TARGET)
+            ?.takeIf(String::isNotBlank)
+            ?.let { targetId ->
+                applyExternalGameReturnAction(externalGameReturnHandoff.replaceSession(targetId))
+            }
+        consumeExternalGameReturnIntent(intent)
+        LowerDisplayHandoffCoordinator.register(lowerDisplayTaskOwner)
         Log.i(
             THEME_DIAGNOSTIC_TAG,
             "onCreate requestedContext=${intent.skinContextOr(SkinContext.GAMEPLAY)} " +
@@ -462,6 +479,9 @@ class TrackpadActivity : ComponentActivity() {
             val connectionWasEstablished = !connectionDiagnostics.isConnected &&
                 updatedDiagnostics.isConnected
             connectionDiagnostics = updatedDiagnostics
+            applyExternalGameReturnAction(
+                externalGameReturnHandoff.onConnectionChanged(updatedDiagnostics.isConnected),
+            )
             if (connectionWasLost) {
                 cropApplicationGate.invalidate()
                 upperPresentationGate.cancel(invalidateRequest = true)
@@ -630,6 +650,7 @@ class TrackpadActivity : ComponentActivity() {
         val changed = previous != null &&
             (previous.generation != geometry.generation || previous.gameId != geometry.gameId)
         mirrorSourceGeometry = geometry
+        applyExternalGameReturnAction(externalGameReturnHandoff.onTargetObserved(geometry.gameId))
         when {
             pendingCropTargetId == geometry.gameId -> Unit
             mirrorCropRepository.selection.value.gameId.isBlank() && geometry.gameId.isNotBlank() -> {
@@ -731,6 +752,7 @@ class TrackpadActivity : ComponentActivity() {
             editorSplit = cropEditorModel?.split.takeIf { cropEditorVisible },
             connected = connectionDiagnostics.isConnected,
             activeSurfaceReady = activeSurfaceReady,
+            guiOverlayVisible = isDialogSafeOverlayActive(geometry, connectionDiagnostics.isConnected),
         )
         logCompositionTransition(
             requestedMode = requestedPreferredDisplayMode ?: preferences.preferredMode,
@@ -880,6 +902,8 @@ class TrackpadActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        cancelExternalGameReturnConfirmation()
+        LowerDisplayHandoffCoordinator.unregister(lowerDisplayTaskOwner)
         enterSafeTrackpadMode()
         mirrorLifecycleActive = false
         mirrorHost?.dispose()
@@ -901,6 +925,7 @@ class TrackpadActivity : ComponentActivity() {
         releaseForwardedGamepadKeys()
         CursorDeltaCoordinator.releaseJoystickAxes()
         setIntent(intent)
+        consumeExternalGameReturnIntent(intent)
         val requestedSkinContext = intent.skinContextOr(lowerSkinContext)
         lowerSkinContext = lowerSkinContextForIntent(
             requestedContext = requestedSkinContext,
@@ -918,6 +943,75 @@ class TrackpadActivity : ComponentActivity() {
         recordLifecycle("NEW_INTENT")
         ScummVMInputClient.queryMirrorGeometry()
         if (mirrorLifecycleActive) mirrorHost?.activate(currentDisplayId)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        externalGameReturnHandoff.currentExpectedTargetId()?.let { targetId ->
+            outState.putString(STATE_EXTERNAL_RETURN_TARGET, targetId)
+        }
+        super.onSaveInstanceState(outState)
+    }
+
+    private fun consumeExternalGameReturnIntent(intent: Intent) {
+        val isExternalSession = intent.getBooleanExtra(
+            DualDisplayCoordinator.EXTRA_EXTERNAL_LAUNCH_SESSION,
+            false,
+        )
+        val expectedTargetId = intent.getStringExtra(DualDisplayCoordinator.EXTRA_EXTERNAL_LAUNCH_TARGET)
+        val action = when {
+            isExternalSession && !expectedTargetId.isNullOrBlank() -> {
+                Log.i(TAG, "Armed external lower-display return for '$expectedTargetId'")
+                externalGameReturnHandoff.replaceSession(expectedTargetId)
+            }
+            intent.getStringExtra(DualDisplayCoordinator.EXTRA_SKIN_CONTEXT) == SkinContext.LAUNCHER.name -> {
+                externalGameReturnHandoff.clearSession()
+            }
+            else -> ExternalGameReturnAction.None
+        }
+        intent.removeExtra(DualDisplayCoordinator.EXTRA_EXTERNAL_LAUNCH_SESSION)
+        intent.removeExtra(DualDisplayCoordinator.EXTRA_EXTERNAL_LAUNCH_TARGET)
+        applyExternalGameReturnAction(action)
+    }
+
+    private fun applyExternalGameReturnAction(action: ExternalGameReturnAction) {
+        when (action) {
+            ExternalGameReturnAction.None -> Unit
+            ExternalGameReturnAction.CancelPendingConfirmation -> {
+                cancelExternalGameReturnConfirmation()
+            }
+            is ExternalGameReturnAction.ScheduleConfirmation -> {
+                cancelExternalGameReturnConfirmation()
+                externalGameReturnConfirmation = Runnable {
+                    externalGameReturnConfirmation = null
+                    applyExternalGameReturnAction(
+                        externalGameReturnHandoff.onConfirmationDelayElapsed(action.token),
+                    )
+                }.also { runnable ->
+                    mainHandler.postDelayed(runnable, EXTERNAL_GAME_EXIT_CONFIRMATION_MILLIS)
+                }
+            }
+            is ExternalGameReturnAction.QueryFreshGeometry -> {
+                if (!ScummVMInputClient.queryMirrorGeometry()) {
+                    externalGameReturnHandoff.onFreshGeometryQueryFailed(action.token)
+                    Log.w(TAG, "Could not query fresh geometry for external lower-display return")
+                }
+            }
+            is ExternalGameReturnAction.BackgroundLowerDisplay -> {
+                val succeeded = lowerDisplayTaskOwner.moveTaskToBackground()
+                externalGameReturnHandoff.onHandoffResult(action.token, succeeded)
+                if (succeeded) {
+                    Log.i(TAG, "Returned lower display to the external launcher")
+                } else {
+                    Log.w(TAG, "Could not return lower display to the external launcher")
+                    ScummVMInputClient.queryMirrorGeometry()
+                }
+            }
+        }
+    }
+
+    private fun cancelExternalGameReturnConfirmation() {
+        externalGameReturnConfirmation?.let(mainHandler::removeCallbacks)
+        externalGameReturnConfirmation = null
     }
 
     private fun onMirrorViewAvailable(host: MirrorHost) {
@@ -1303,6 +1397,8 @@ class TrackpadActivity : ComponentActivity() {
         const val GESTURE_TAG = "AdventurePadGesture"
         const val CROP_PREVIEW_INTERVAL_MILLIS = 16L
         const val TRIGGER_CHORD_WINDOW_MILLIS = 120L
+        const val EXTERNAL_GAME_EXIT_CONFIRMATION_MILLIS = 1_000L
+        const val STATE_EXTERNAL_RETURN_TARGET = "externalReturnTarget"
     }
 }
 

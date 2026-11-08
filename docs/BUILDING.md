@@ -4,7 +4,9 @@
 
 Release signing and debug-signer migration are covered in [Release Signing](RELEASE_SIGNING.md).
 
-AdventurePad consists of two source projects that produce a matching APK pair:
+AdventurePad consists of two independent source projects. Standalone development
+builds produce a matching APK pair; the distribution build composes them into one
+AdventurePad APK without combining repositories or Git history:
 
 ```text
 upstream ScummVM
@@ -14,7 +16,9 @@ AdventurePad-maintained ScummVM changes
 AdventurePad app
 ```
 
-The AdventurePad app builds independently, but the installed product requires its matching custom ScummVM build. Official ScummVM does not contain the bridge used by AdventurePad.
+The AdventurePad app and custom engine each build independently. Official ScummVM
+does not contain the bridge used by AdventurePad. See [Combined AdventurePad APK](COMBINED_APK.md)
+for the pinned build-time composition, migration constraints, and release workflow.
 
 ## Current toolchain contract
 
@@ -48,7 +52,8 @@ app/build/outputs/apk/debug/app-debug.apk
 
 The debug and release variants both use `com.jamesmoran.adventurepad`; no application-ID suffix is configured. When all four `ADVENTUREPAD_RELEASE_*` values are present in ignored `local.properties`, both variants use the controlled release signer so they can update one another in place. Without those private values, ordinary debug builds use Android's normal developer debug signer and release output is unsigned. The build copies the canonical skin-authoring JSON into generated app assets during `preBuild`.
 
-ScummVM does not need to be built first to compile or test this project, because the bridge is implemented through Android intents, Messenger messages, permissions, and package/component names rather than a compile-time module dependency.
+ScummVM does not need to be built first to compile or test the default standalone
+AdventurePad project. Only the opt-in combined build adds the engine library adapter.
 
 Connected-device tests, when a suitable device is available, use:
 

@@ -23,6 +23,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var skinRepository: SkinRepository
     private lateinit var launcherLibraryMetadataRepository: LauncherLibraryMetadataRepository
     private lateinit var launcherPointerInput: LauncherPointerInput
+    private lateinit var externalLauncherSyncCoordinator: ExternalLauncherSyncCoordinator
     private var libraryState by mutableStateOf(ScummVMLibraryState())
     private var ownsTopScreenCursor by mutableStateOf(false)
 
@@ -32,6 +33,7 @@ class MainActivity : ComponentActivity() {
         skinRepository = SkinRepository.get(this)
         launcherLibraryMetadataRepository = LauncherLibraryMetadataRepository.create(this, lifecycleScope)
         launcherPointerInput = LauncherPointerInput(this)
+        externalLauncherSyncCoordinator = ExternalLauncherSyncCoordinator.create(this, lifecycleScope)
         libraryClient = ScummVMLibraryClient(
             context = this,
             onStateChanged = { libraryState = it },
@@ -55,12 +57,13 @@ class MainActivity : ComponentActivity() {
                 libraryState.connected,
                 launcherMetadata.loaded,
             ) {
-                if (launcherMetadata.loaded && libraryState.connected &&
-                    !libraryState.loading && libraryState.error == null
-                ) {
-                    launcherLibraryMetadataRepository.reconcileTargets(
-                        libraryState.targets.map(ScummVMTarget::targetId),
-                    )
+                if (libraryState.connected && !libraryState.loading && libraryState.error == null) {
+                    externalLauncherSyncCoordinator.submit(libraryState.targets)
+                    if (launcherMetadata.loaded) {
+                        launcherLibraryMetadataRepository.reconcileTargets(
+                            libraryState.targets.map(ScummVMTarget::targetId),
+                        )
+                    }
                 }
             }
             val launcherSkin = skinRepository.resolve(SkinContext.LAUNCHER)
@@ -127,7 +130,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun launchTarget(target: ScummVMTarget) {
-        if (libraryClient.launch(target.targetId)) {
+        if (libraryClient.launch(target.targetId, ScummVMLaunchOrigin.FIRST_PARTY_ADVENTUREPAD)) {
             lifecycleScope.launch {
                 launcherLibraryMetadataRepository.recordLaunch(target.targetId)
             }
@@ -146,7 +149,12 @@ class MainActivity : ComponentActivity() {
             ).show()
             return
         }
-        if (libraryClient.resume(target.targetId, saveSlot)) {
+        if (libraryClient.resume(
+                target.targetId,
+                saveSlot,
+                ScummVMLaunchOrigin.FIRST_PARTY_ADVENTUREPAD,
+            )
+        ) {
             lifecycleScope.launch {
                 launcherLibraryMetadataRepository.recordLaunch(target.targetId)
             }
@@ -164,7 +172,11 @@ class MainActivity : ComponentActivity() {
             ).show()
             return
         }
-        if (!libraryClient.openLoadGame(target.targetId)) {
+        if (!libraryClient.openLoadGame(
+                target.targetId,
+                ScummVMLaunchOrigin.FIRST_PARTY_ADVENTUREPAD,
+            )
+        ) {
             Toast.makeText(this, "ScummVM is not connected yet.", Toast.LENGTH_SHORT).show()
         }
     }

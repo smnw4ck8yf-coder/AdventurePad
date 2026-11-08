@@ -44,6 +44,8 @@ internal fun selectEligibleSecondaryDisplayId(candidates: List<DisplayCandidate>
 internal object DualDisplayCoordinator {
     const val EXTRA_LAUNCH_REASON = "com.jamesmoran.adventurepad.LAUNCH_REASON"
     const val EXTRA_SKIN_CONTEXT = "com.jamesmoran.adventurepad.SKIN_CONTEXT"
+    const val EXTRA_EXTERNAL_LAUNCH_SESSION = "com.jamesmoran.adventurepad.EXTERNAL_LAUNCH_SESSION"
+    const val EXTRA_EXTERNAL_LAUNCH_TARGET = "com.jamesmoran.adventurepad.EXTERNAL_LAUNCH_TARGET"
 
     private const val TAG = "AdventurePadTasks"
     // NEW_TASK routes each singleTask activity to its declared affinity without duplicating tasks.
@@ -75,7 +77,11 @@ internal object DualDisplayCoordinator {
         )
     }
 
-    fun restoreGameplayTrackpad(activity: Activity, reason: String): DisplayLaunchResult {
+    fun restoreGameplayTrackpad(
+        activity: Activity,
+        reason: String,
+        externalLaunchTargetId: String? = null,
+    ): DisplayLaunchResult {
         val displayManager = activity.getSystemService(DisplayManager::class.java)
         val secondaryDisplay = findEligibleSecondaryDisplay(displayManager)
             ?: return DisplayLaunchResult(
@@ -84,6 +90,12 @@ internal object DualDisplayCoordinator {
             )
         val trackpadIntent = activityIntent<TrackpadActivity>(activity, reason)
             .putExtra(EXTRA_SKIN_CONTEXT, SkinContext.GAMEPLAY.name)
+            .apply {
+                externalLaunchTargetId?.takeIf(String::isNotBlank)?.let { targetId ->
+                    putExtra(EXTRA_EXTERNAL_LAUNCH_SESSION, true)
+                    putExtra(EXTRA_EXTERNAL_LAUNCH_TARGET, targetId)
+                }
+            }
         val permissionError = checkLaunchAllowed(
             activity = activity,
             displayId = secondaryDisplay.displayId,

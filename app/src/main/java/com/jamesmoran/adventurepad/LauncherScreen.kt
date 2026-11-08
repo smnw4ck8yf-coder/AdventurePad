@@ -889,7 +889,7 @@ private fun LauncherHeader(
                             border = BorderStroke(2.dp, palette.launcherAccentDark),
                             shape = RoundedCornerShape(10.dp),
                         ) {
-                            Text("Cocoon Setup", fontWeight = FontWeight.Bold)
+                            Text("External Launchers", fontWeight = FontWeight.Bold)
                         }
                         OutlinedButton(
                             onClick = onSettings,

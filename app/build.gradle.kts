@@ -9,9 +9,15 @@ val adventurePadSigningKeys = listOf(
     "ADVENTUREPAD_RELEASE_KEY_ALIAS",
     "ADVENTUREPAD_RELEASE_KEY_PASSWORD",
 )
+fun signingValue(key: String): String? =
+    adventurePadSigningProperties.getProperty(key)?.takeIf(String::isNotBlank)
+        ?: System.getenv(key)?.takeIf(String::isNotBlank)
 val adventurePadSigningConfigured = adventurePadSigningKeys.all {
-    !adventurePadSigningProperties.getProperty(it).isNullOrBlank()
+    signingValue(it) != null
 }
+val bundledScummVM = providers.gradleProperty("adventurepad.bundledEngine")
+    .orNull
+    .equals("true", ignoreCase = true)
 
 plugins {
     alias(libs.plugins.android.application)
@@ -32,15 +38,21 @@ android {
         versionName = "0.2.0-preview"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField(
+            "String",
+            "SCUMMVM_PACKAGE",
+            if (bundledScummVM) "\"com.jamesmoran.adventurepad\"" else "\"org.scummvm.scummvm.debug\"",
+        )
+        buildConfigField("boolean", "BUNDLED_SCUMMVM", bundledScummVM.toString())
     }
 
     signingConfigs {
         if (adventurePadSigningConfigured) {
             create("adventurePadRelease") {
-                storeFile = file(adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_STORE_FILE"))
-                storePassword = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_STORE_PASSWORD")
-                keyAlias = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_KEY_ALIAS")
-                keyPassword = adventurePadSigningProperties.getProperty("ADVENTUREPAD_RELEASE_KEY_PASSWORD")
+                storeFile = file(signingValue("ADVENTUREPAD_RELEASE_STORE_FILE")!!)
+                storePassword = signingValue("ADVENTUREPAD_RELEASE_STORE_PASSWORD")
+                keyAlias = signingValue("ADVENTUREPAD_RELEASE_KEY_ALIAS")
+                keyPassword = signingValue("ADVENTUREPAD_RELEASE_KEY_PASSWORD")
             }
         }
     }
@@ -65,7 +77,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
     buildFeatures {
+        buildConfig = true
         compose = true
+    }
+    packaging {
+        // The engine is large; compress it in the release APK and extract it at install time.
+        // This keeps GitHub Release downloads comparable to the standalone ScummVM APK.
+        jniLibs.useLegacyPackaging = bundledScummVM
     }
 
     sourceSets.getByName("main").assets.directories.add(
@@ -83,6 +101,9 @@ tasks.named("preBuild").configure {
 }
 
 dependencies {
+    if (bundledScummVM) {
+        implementation(project(":scummvmEngine"))
+    }
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)

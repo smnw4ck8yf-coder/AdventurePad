@@ -28,6 +28,11 @@ internal fun displayModeFromStoredValue(value: String?): DisplayMode =
     value?.let { stored -> DisplayMode.entries.firstOrNull { it.name == stored } }
         ?: DisplayMode.INTERFACE
 
+internal fun isDialogSafeOverlayActive(
+    geometry: MirrorSourceGeometry?,
+    connected: Boolean,
+): Boolean = connected && geometry?.gameId?.isNotBlank() == true && geometry.guiOverlayVisible
+
 internal data class DisplayComposition(
     val mode: DisplayMode,
     val upperExpandedRequested: Boolean,
@@ -53,6 +58,7 @@ internal enum class PresentationOwner {
     TRACKPAD,
     SPLIT_VIEW,
     EDITOR,
+    DIALOG_SAFE,
 }
 
 /** One owner decides both EGL consumers; editor state always takes priority over runtime state. */
@@ -80,7 +86,17 @@ internal fun resolvePresentationTarget(
     editorSplit: InterfaceSplit?,
     connected: Boolean,
     activeSurfaceReady: Boolean,
+    guiOverlayVisible: Boolean = false,
 ): PresentationTarget {
+    if (guiOverlayVisible) {
+        return PresentationTarget(
+            owner = PresentationOwner.DIALOG_SAFE,
+            mode = DisplayMode.TRACKPAD,
+            lowerCrop = NormalizedCrop.FullFrame,
+            upperCrop = NormalizedCrop.FullFrame,
+            runtimePanelRequested = false,
+        )
+    }
     val validEditorSplit = editorSplit?.takeIf { it.isValid() }
     if (validEditorSplit != null) {
         val ready = connected && activeSurfaceReady

@@ -58,6 +58,14 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".ReturnToAdventurePadActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:noHistory="true"
+            android:permission="com.jamesmoran.adventurepad.permission.LAUNCH_TRACKPAD"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+        <activity
             android:name=".CocoonIntegrationActivity"
             android:exported="false"
             android:resizeableActivity="true"

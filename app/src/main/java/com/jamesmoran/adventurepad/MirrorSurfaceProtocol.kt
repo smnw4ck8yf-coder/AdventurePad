@@ -45,6 +45,10 @@ internal object MirrorSurfaceProtocol {
     const val KEY_POINTER_ID = "pointerId"
     const val KEY_POINTER_SEQUENCE_ID = "pointerSequenceId"
     const val KEY_CURSOR_VISIBLE = "cursorVisible"
+    const val KEY_GUI_OVERLAY_VISIBLE = "guiOverlayVisible"
+    const val KEY_BRIDGE_STATE_GENERATION = "bridgeStateGeneration"
+    const val KEY_QUERY_GENERATION = "queryGeneration"
+    const val KEY_SUBSCRIBE_GEOMETRY = "subscribeGeometry"
 
     const val STATUS_SUPPORTED = 1
     const val STATUS_UNSUPPORTED_NO_TEXTURE = 2
@@ -169,4 +173,35 @@ internal object DisplayModeGenerations {
     private val nextGeneration = AtomicLong(SystemClock.elapsedRealtime().coerceAtLeast(1L))
 
     fun next(): Long = nextGeneration.incrementAndGet()
+}
+
+internal object BridgeQueryGenerations {
+    private val nextGeneration = AtomicLong(SystemClock.elapsedRealtimeNanos().coerceAtLeast(1L))
+
+    fun next(): Long = nextGeneration.incrementAndGet()
+}
+
+/** Rejects replies for superseded queries and state older than the last accepted bridge snapshot. */
+internal class BridgeGeometryResponseGate {
+    private var activeQueryGeneration = 0L
+    private var lastStateGeneration = 0L
+
+    fun beginQuery(queryGeneration: Long) {
+        require(queryGeneration > 0)
+        activeQueryGeneration = queryGeneration
+        lastStateGeneration = 0L
+    }
+
+    fun accept(queryGeneration: Long, stateGeneration: Long): Boolean {
+        if (queryGeneration <= 0 || queryGeneration != activeQueryGeneration ||
+            stateGeneration < lastStateGeneration
+        ) return false
+        lastStateGeneration = stateGeneration
+        return true
+    }
+
+    fun invalidate() {
+        activeQueryGeneration = 0L
+        lastStateGeneration = 0L
+    }
 }

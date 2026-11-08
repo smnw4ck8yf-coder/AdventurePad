@@ -29,7 +29,7 @@ internal data class ScummVMConnectionDiagnostics(
 /** Explicit, lifecycle-bound Messenger connection to the custom ScummVM debug app. */
 internal object ScummVMInputClient {
     private const val TAG = "AdventurePadIPC"
-    private const val SCUMMVM_PACKAGE = "org.scummvm.scummvm.debug"
+    private val SCUMMVM_PACKAGE = BuildConfig.SCUMMVM_PACKAGE
     private const val SCUMMVM_SERVICE = "org.scummvm.scummvm.RelativeInputService"
     private const val MSG_RELATIVE_MOVE = 1
     private const val MSG_JOYSTICK_AXIS = 6
@@ -55,6 +55,7 @@ internal object ScummVMInputClient {
     private var upperPresentationAcknowledgementListener: ((UpperPresentationAcknowledgement) -> Unit)? = null
     private var mirrorCursorListener: ((MirrorCursorState) -> Unit)? = null
     private var mirrorStatus = MirrorOutputStatus()
+    private val geometryResponseGate = BridgeGeometryResponseGate()
     private var initializationLogCount = 0
     private var firstCursorReplyLogged = false
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -62,6 +63,18 @@ internal object ScummVMInputClient {
         override fun handleMessage(message: Message) {
             val data = message.data
             if (message.what == MirrorSurfaceProtocol.MSG_GEOMETRY) {
+                val queryGeneration = data.getLong(MirrorSurfaceProtocol.KEY_QUERY_GENERATION, 0)
+                val stateGeneration = data.getLong(
+                    MirrorSurfaceProtocol.KEY_BRIDGE_STATE_GENERATION,
+                    0,
+                )
+                if (!geometryResponseGate.accept(queryGeneration, stateGeneration)) {
+                    Log.i(
+                        TAG,
+                        "Ignored stale geometry query=$queryGeneration state=$stateGeneration",
+                    )
+                    return
+                }
                 logInitialization(
                     "reply GEOMETRY generation=${data.getLong(MirrorSurfaceProtocol.KEY_GEOMETRY_GENERATION, 0)} " +
                         "source=${data.getInt(MirrorSurfaceProtocol.KEY_SOURCE_WIDTH, 0)}x" +
@@ -77,6 +90,12 @@ internal object ScummVMInputClient {
                         orientation = SourceOrientation.fromWireValue(
                             data.getInt(MirrorSurfaceProtocol.KEY_ORIENTATION, 0),
                         ),
+                        guiOverlayVisible = data.getBoolean(
+                            MirrorSurfaceProtocol.KEY_GUI_OVERLAY_VISIBLE,
+                            false,
+                        ),
+                        bridgeStateGeneration = stateGeneration,
+                        queryGeneration = queryGeneration,
                     ),
                 )
                 return
@@ -298,10 +317,18 @@ internal object ScummVMInputClient {
         mirrorCursorListener = listener
     }
 
-    fun queryMirrorGeometry(): Boolean = sendMirrorMessage(
-        MirrorSurfaceProtocol.MSG_QUERY_GEOMETRY,
-        Bundle.EMPTY,
-    ).also { sent -> logInitialization("send QUERY_GEOMETRY sent=$sent") }
+    fun queryMirrorGeometry(): Boolean {
+        val queryGeneration = BridgeQueryGenerations.next()
+        geometryResponseGate.beginQuery(queryGeneration)
+        val data = Bundle().apply {
+            putLong(MirrorSurfaceProtocol.KEY_QUERY_GENERATION, queryGeneration)
+            putBoolean(MirrorSurfaceProtocol.KEY_SUBSCRIBE_GEOMETRY, true)
+        }
+        return sendMirrorMessage(MirrorSurfaceProtocol.MSG_QUERY_GEOMETRY, data).also { sent ->
+            if (!sent) geometryResponseGate.invalidate()
+            logInitialization("send QUERY_GEOMETRY generation=$queryGeneration sent=$sent")
+        }
+    }
 
     fun applyMirrorCrop(
         crop: NormalizedCrop,
@@ -381,6 +408,7 @@ internal object ScummVMInputClient {
             }
         }
         remoteMessenger = null
+        geometryResponseGate.invalidate()
         clearGamepadState()
         bindingTracker.stop()
         applicationContext = null
@@ -629,6 +657,7 @@ internal object ScummVMInputClient {
     private fun handleConnectionLoss(event: String, replaceBinding: Boolean) {
         val wasConnected = remoteMessenger != null
         remoteMessenger = null
+        geometryResponseGate.invalidate()
         clearGamepadState()
         lastConnectionEvent = event
         if (replaceBinding) abandonCurrentBinding()

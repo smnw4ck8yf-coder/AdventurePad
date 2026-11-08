@@ -24,3 +24,11 @@ dependencyResolutionManagement {
 
 rootProject.name = "AdventurePad"
 include(":app")
+
+val bundledScummVM = providers.gradleProperty("adventurepad.bundledEngine")
+    .orNull
+    .equals("true", ignoreCase = true)
+if (bundledScummVM) {
+    include(":scummvmEngine")
+    project(":scummvmEngine").projectDir = file("scummvm-engine")
+}

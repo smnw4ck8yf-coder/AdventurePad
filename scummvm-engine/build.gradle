@@ -1,0 +1,108 @@
+plugins {
+    id 'com.android.library'
+}
+
+def engineProperties = new Properties()
+rootProject.file('scummvm-engine.properties').withInputStream { engineProperties.load(it) }
+def pinnedRevision = engineProperties.getProperty('revision').trim()
+def scummVMRoot = providers.gradleProperty('scummvm.dir')
+    .map { file(it) }
+    .getOrElse(rootProject.file('../ScummVM-AdventurePad'))
+    .canonicalFile
+def generatedAndroidProject = new File(scummVMRoot, 'android_project')
+
+android {
+    namespace 'org.scummvm.scummvm'
+    compileSdk 37
+    ndkVersion '23.2.8568313'
+
+    defaultConfig {
+        minSdk 33
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs new File(scummVMRoot, 'backends/platform/android')
+            res.srcDirs new File(scummVMRoot, 'dists/android/res')
+            assets.srcDirs new File(generatedAndroidProject, 'mainAssets/src/main/assets')
+            jniLibs.srcDirs new File(generatedAndroidProject, 'lib')
+            manifest.srcFile project.file('src/main/AndroidManifest.xml')
+        }
+    }
+
+    lint {
+        abortOnError false
+    }
+}
+
+dependencies {
+    implementation 'androidx.annotation:annotation:1.10.0'
+}
+
+def gitOutput = { String... arguments ->
+    def command = ['git', '-C', scummVMRoot.absolutePath] + arguments.toList()
+    def process = new ProcessBuilder(command).redirectErrorStream(true).start()
+    def output = process.inputStream.getText('UTF-8').trim()
+    if (process.waitFor() != 0) {
+        throw new GradleException("Git command failed: ${output}")
+    }
+    output
+}
+
+def verifyScummVMRevision = tasks.register('verifyScummVMRevision') {
+    group = 'verification'
+    description = 'Checks that the bundled ScummVM checkout matches scummvm-engine.properties.'
+    doLast {
+        if (!new File(scummVMRoot, '.git').exists()) {
+            throw new GradleException(
+                "ScummVM checkout not found at ${scummVMRoot}; pass -Pscummvm.dir=/absolute/path."
+            )
+        }
+        def actualRevision = gitOutput('rev-parse', 'HEAD')
+        if (actualRevision != pinnedRevision) {
+            throw new GradleException(
+                "Bundled ScummVM revision is ${actualRevision}, expected ${pinnedRevision}. " +
+                'Update scummvm-engine.properties deliberately after testing the engine checkout.'
+            )
+        }
+    }
+}
+
+def verifyScummVMGeneratedInputs = tasks.register('verifyScummVMGeneratedInputs') {
+    group = 'verification'
+    description = 'Checks that the pinned engine has generated assets and an arm64 native library.'
+    dependsOn verifyScummVMRevision
+    doLast {
+        def nativeLibrary = new File(generatedAndroidProject, 'lib/arm64-v8a/libscummvm.so')
+        def assetsDirectory = new File(generatedAndroidProject, 'mainAssets/src/main/assets')
+        if (!nativeLibrary.isFile()) {
+            throw new GradleException(
+                "Missing ${nativeLibrary}. Build the ScummVM Android project from its repository first."
+            )
+        }
+        if (!assetsDirectory.isDirectory()) {
+            throw new GradleException(
+                "Missing ${assetsDirectory}. Build the ScummVM Android project from its repository first."
+            )
+        }
+    }
+}
+
+tasks.named('preBuild') {
+    dependsOn verifyScummVMGeneratedInputs
+}
+
+tasks.register('verifyScummVMClean') {
+    group = 'verification'
+    description = 'Release gate: checks that the pinned ScummVM checkout has no source changes.'
+    dependsOn verifyScummVMRevision
+    doLast {
+        def dirty = gitOutput('status', '--porcelain', '--untracked-files=all')
+        if (!dirty.isEmpty()) {
+            throw new GradleException(
+                'The ScummVM checkout contains uncommitted files. ' +
+                'Release builds must use the exact pinned commit.'
+            )
+        }
+    }
+}

@@ -24,7 +24,6 @@ class ExternalGameLaunchActivity : ComponentActivity() {
     private var retryNotBeforeUptime = 0L
     private var nextDispatchNotBeforeUptime = 0L
     private var retryArmed = false
-    private var confirmationCandidate: ConfirmationCandidate? = null
 
     private val retryRunnable = Runnable { resolvePendingRequest() }
 
@@ -43,7 +42,6 @@ class ExternalGameLaunchActivity : ComponentActivity() {
                 val lostConnection = libraryState.connected && !state.connected
                 libraryState = state
                 if (lostConnection && requestCoordinator.current()?.attempts?.let { it > 0 } == true) {
-                    confirmationCandidate = null
                     retryArmed = true
                     retryNotBeforeUptime = SystemClock.uptimeMillis() + PROCESS_RESTART_SETTLE_MILLIS
                     timeoutHandler.removeCallbacks(retryRunnable)
@@ -51,7 +49,6 @@ class ExternalGameLaunchActivity : ComponentActivity() {
                 }
                 resolvePendingRequest()
             },
-            onActiveTargetChanged = ::handleActiveTarget,
             // A process-restart retry must not race ScummVM's hidden save-capability refresh.
             refreshSaveCapabilitiesOnConnect = false,
         )
@@ -86,7 +83,6 @@ class ExternalGameLaunchActivity : ComponentActivity() {
                 val request = requestCoordinator.replace(result.targetId)
                 retryNotBeforeUptime = 0L
                 retryArmed = false
-                confirmationCandidate = null
                 Log.i(TAG, "Accepted external target request generation=${request.generation}")
                 timeoutHandler.removeCallbacks(timeoutRunnable)
                 timeoutHandler.postDelayed(timeoutRunnable, LIBRARY_TIMEOUT_MILLIS)
@@ -137,34 +133,16 @@ class ExternalGameLaunchActivity : ComponentActivity() {
             maxAttempts = MAX_LAUNCH_ATTEMPTS,
         ) ?: return
         retryArmed = false
-        if (!libraryClient.launch(targetId)) {
+        if (!libraryClient.launch(targetId, ScummVMLaunchOrigin.EXTERNAL_LAUNCHER)) {
             Log.w(TAG, "ScummVM rejected launch attempt ${request.attempts + 1} for '$targetId'")
             return
         }
-        nextDispatchNotBeforeUptime = now + PROCESS_RESTART_SETTLE_MILLIS
-        libraryClient.queryActiveTarget()
-        Log.i(TAG, "Dispatched attempt ${request.attempts + 1} for configured target '$targetId'")
-    }
-
-    private fun handleActiveTarget(activeTargetId: String) {
-        val request = requestCoordinator.current()?.takeIf { it.targetId == activeTargetId } ?: return
-        val now = SystemClock.uptimeMillis()
-        val candidate = confirmationCandidate
-        if (candidate?.generation != request.generation) {
-            confirmationCandidate = ConfirmationCandidate(request.generation, now)
-            timeoutHandler.postDelayed(
-                { if (!terminal) libraryClient.queryActiveTarget() },
-                TARGET_CONFIRMATION_STABILITY_MILLIS,
-            )
-            return
-        }
-        if (now - candidate.firstSeenUptime < TARGET_CONFIRMATION_STABILITY_MILLIS) return
-        val targetId = requestCoordinator.confirm(activeTargetId) ?: return
         terminal = true
         timeoutHandler.removeCallbacks(timeoutRunnable)
         val displayResult = DualDisplayCoordinator.restoreGameplayTrackpad(
             activity = this,
-            reason = "External launcher requested configured target '$targetId'",
+            reason = "External launcher dispatch accepted for configured target '$targetId'",
+            externalLaunchTargetId = targetId,
         )
         if (displayResult.succeeded) {
             Log.i(TAG, "Dispatched configured target '$targetId'; ${displayResult.message}")
@@ -191,11 +169,5 @@ class ExternalGameLaunchActivity : ComponentActivity() {
         const val LIBRARY_TIMEOUT_MILLIS = 12_000L
         const val MAX_LAUNCH_ATTEMPTS = 2
         const val PROCESS_RESTART_SETTLE_MILLIS = 2_500L
-        const val TARGET_CONFIRMATION_STABILITY_MILLIS = 2_500L
     }
-
-    private data class ConfirmationCandidate(
-        val generation: Long,
-        val firstSeenUptime: Long,
-    )
 }

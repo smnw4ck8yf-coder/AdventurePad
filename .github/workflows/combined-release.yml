@@ -1,0 +1,111 @@
+name: Combined AdventurePad APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out AdventurePad
+        uses: actions/checkout@v4
+
+      - name: Read pinned engine revision
+        id: pairing
+        shell: bash
+        run: echo "revision=$(sed -n 's/^revision=//p' scummvm-engine.properties)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned ScummVM-AdventurePad
+        uses: actions/checkout@v4
+        with:
+          repository: smnw4ck8yf-coder/ScummVM-AdventurePad
+          ref: ${{ steps.pairing.outputs.revision }}
+          path: ScummVM-AdventurePad
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install pinned Android toolchain
+        shell: bash
+        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;23.2.8568313'
+
+      - name: Build pinned native dependencies
+        shell: bash
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          tools/bootstrap-scummvm-android-deps.sh "$RUNNER_TEMP/scummvm-deps"
+
+      - name: Build pinned ScummVM engine
+        working-directory: ScummVM-AdventurePad
+        shell: bash
+        run: |
+          export ANDROID_NDK_ROOT="$ANDROID_SDK_ROOT/ndk/23.2.8568313"
+          CXXFLAGS="-I$RUNNER_TEMP/scummvm-deps/src/oboe/include" \
+          LDFLAGS="-L$RUNNER_TEMP/scummvm-deps/oboe-build-arm64" \
+          ./configure \
+            --host=android-arm64-v8a \
+            --with-flac-prefix="$RUNNER_TEMP/scummvm-deps/flac-prefix-arm64" \
+            --with-png-prefix="$RUNNER_TEMP/scummvm-deps/libpng-prefix-arm64"
+          make -j"$(nproc)" ScummVM-debug.apk
+
+      - name: Decode release keystore
+        shell: bash
+        env:
+          ADVENTUREPAD_RELEASE_KEYSTORE_BASE64: ${{ secrets.ADVENTUREPAD_RELEASE_KEYSTORE_BASE64 }}
+        run: echo "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/adventurepad-release.jks"
+
+      - name: Test standalone AdventurePad
+        run: ./gradlew testDebugUnitTest assembleDebug
+
+      - name: Build signed combined release
+        env:
+          ADVENTUREPAD_RELEASE_STORE_FILE: ${{ runner.temp }}/adventurepad-release.jks
+          ADVENTUREPAD_RELEASE_STORE_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_STORE_PASSWORD }}
+          ADVENTUREPAD_RELEASE_KEY_ALIAS: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_ALIAS }}
+          ADVENTUREPAD_RELEASE_KEY_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_PASSWORD }}
+        run: |
+          test -s "$ADVENTUREPAD_RELEASE_STORE_FILE"
+          test -n "$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
+          test -n "$ADVENTUREPAD_RELEASE_KEY_ALIAS"
+          test -n "$ADVENTUREPAD_RELEASE_KEY_PASSWORD"
+          ./gradlew \
+            -Padventurepad.bundledEngine=true \
+            -Pscummvm.dir="$GITHUB_WORKSPACE/ScummVM-AdventurePad" \
+            :scummvmEngine:verifyScummVMClean \
+            :app:assembleRelease
+
+      - name: Assemble source and licence bundle
+        shell: bash
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/release/app-release.apk release/AdventurePad-combined-arm64.apk
+          cp ScummVM-AdventurePad/COPYING release/SCUMMVM-COPYING.txt
+          cp ScummVM-AdventurePad/COPYRIGHT release/SCUMMVM-COPYRIGHT.txt
+          cp "$RUNNER_TEMP/scummvm-deps/src/oboe/LICENSE" release/OBOE-LICENSE.txt
+          cp "$RUNNER_TEMP/scummvm-deps/src/libpng/LICENSE.md" release/LIBPNG-LICENSE.md
+          cp "$RUNNER_TEMP/scummvm-deps/src/flac/COPYING.Xiph" release/FLAC-COPYING.txt
+          git -C ScummVM-AdventurePad archive --format=tar.gz \
+            --output="$GITHUB_WORKSPACE/release/ScummVM-AdventurePad-source-${{ steps.pairing.outputs.revision }}.tar.gz" HEAD
+          {
+            echo "adventurepad=$(git rev-parse HEAD)"
+            echo "scummvm=${{ steps.pairing.outputs.revision }}"
+            cat "$RUNNER_TEMP/scummvm-deps/DEPENDENCIES.lock"
+          } > release/BUILD-PROVENANCE.txt
+          sha256sum release/* > release/SHA256SUMS
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdventurePad-combined-release-candidate
+          path: release/
+          if-no-files-found: error

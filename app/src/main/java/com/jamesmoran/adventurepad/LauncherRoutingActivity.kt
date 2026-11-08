@@ -118,7 +118,7 @@ class LauncherRoutingActivity : Activity() {
 
     private companion object {
         const val TAG = "AdventurePadLaunch"
-        const val SCUMMVM_PACKAGE = "org.scummvm.scummvm.debug"
+        val SCUMMVM_PACKAGE = BuildConfig.SCUMMVM_PACKAGE
         const val SCUMMVM_SERVICE = "org.scummvm.scummvm.RelativeInputService"
         const val BRIDGE_QUERY_TIMEOUT_MILLIS = 3_000L
     }

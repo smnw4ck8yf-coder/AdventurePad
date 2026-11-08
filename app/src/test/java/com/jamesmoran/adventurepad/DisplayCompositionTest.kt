@@ -88,6 +88,53 @@ class DisplayCompositionTest {
         assertTrue(target.runtimePanelRequested)
     }
 
+    @Test fun guiOverlayTemporarilyOwnsDialogSafeTrackpadPresentation() {
+        val target = resolvePresentationTarget(
+            preferredMode = DisplayMode.INTERFACE,
+            savedSplit = InterfaceSplit(0.75f),
+            editorSplit = null,
+            connected = true,
+            activeSurfaceReady = true,
+            guiOverlayVisible = true,
+        )
+
+        assertEquals(PresentationOwner.DIALOG_SAFE, target.owner)
+        assertEquals(DisplayMode.TRACKPAD, target.mode)
+        assertFalse(target.runtimePanelRequested)
+        assertEquals(NormalizedCrop.FullFrame, target.upperCrop)
+    }
+
+    @Test fun closingGuiOverlayRestoresPreferredSplitWithoutChangingPreferences() {
+        val preferences = DisplayModePreferences(preferredMode = DisplayMode.INTERFACE)
+        val split = InterfaceSplit(0.75f)
+        val duringDialog = resolvePresentationTarget(
+            preferences.preferredMode, split, null, true, true, guiOverlayVisible = true,
+        )
+        val afterDialog = resolvePresentationTarget(
+            preferences.preferredMode, split, null, true, true, guiOverlayVisible = false,
+        )
+
+        assertEquals(PresentationOwner.DIALOG_SAFE, duringDialog.owner)
+        assertEquals(PresentationOwner.SPLIT_VIEW, afterDialog.owner)
+        assertEquals(split.interfaceCrop, afterDialog.lowerCrop)
+        assertEquals(DisplayMode.INTERFACE, preferences.preferredMode)
+    }
+
+    @Test fun guiOverlayIsIgnoredWithoutAnActiveTargetOrConnection() {
+        val overlay = MirrorSourceGeometry(
+            width = 320,
+            height = 200,
+            rendererCapability = 1,
+            generation = 7,
+            gameId = "monkey",
+            guiOverlayVisible = true,
+        )
+
+        assertTrue(isDialogSafeOverlayActive(overlay, connected = true))
+        assertFalse(isDialogSafeOverlayActive(overlay.copy(gameId = ""), connected = true))
+        assertFalse(isDialogSafeOverlayActive(overlay, connected = false))
+    }
+
     @Test fun fullWidthBottomCropProducesTopGameplayRectangle() {
         val region = deriveUpperGameplayRegion(bottomCrop)
         assertEquals(UpperExpansionEdge.BOTTOM, region?.interfaceEdge)

@@ -4,6 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.ApplicationInfo
 import android.os.Bundle
 import android.os.Handler
 import android.os.IBinder
@@ -41,6 +42,11 @@ internal data class ScummVMGameRemovalResult(
     val error: String? = null,
 )
 
+internal enum class ScummVMLaunchOrigin(val protocolValue: String) {
+    FIRST_PARTY_ADVENTUREPAD("FIRST_PARTY_ADVENTUREPAD"),
+    EXTERNAL_LAUNCHER("EXTERNAL_LAUNCHER"),
+}
+
 internal class SaveCapabilityRefreshRequestGate {
     private var requested = false
 
@@ -73,6 +79,8 @@ internal class ScummVMLibraryClient(
     private val refreshSaveCapabilitiesOnConnect: Boolean = true,
 ) {
     private val applicationContext = context.applicationContext
+    private val sessionLoggingEnabled =
+        applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
     private var remote: Messenger? = null
     private var bound = false
     private var state = ScummVMLibraryState()
@@ -172,22 +180,35 @@ internal class ScummVMLibraryClient(
     private fun requestSaveCapabilityRefresh(): Boolean =
         saveCapabilityRefreshGate.requestOnce { send(MSG_REFRESH_SAVE_CAPABILITIES) }
 
-    fun launch(targetId: String): Boolean {
+    fun launch(targetId: String, origin: ScummVMLaunchOrigin): Boolean {
         if (targetId.isBlank()) return false
-        return send(MSG_LAUNCH_GAME_TARGET, Bundle().apply { putString(KEY_TARGET_ID, targetId) })
+        if (sessionLoggingEnabled) {
+            Log.d(SESSION_LOG_TAG, "launch target=$targetId origin=${origin.protocolValue}")
+        }
+        return send(MSG_LAUNCH_GAME_TARGET, launchBundle(targetId, origin))
     }
 
-    fun resume(targetId: String, saveSlot: Int): Boolean {
+    fun resume(targetId: String, saveSlot: Int, origin: ScummVMLaunchOrigin): Boolean {
         if (targetId.isBlank() || saveSlot < 0) return false
-        return send(MSG_RESUME_GAME_TARGET, Bundle().apply {
-            putString(KEY_TARGET_ID, targetId)
+        if (sessionLoggingEnabled) {
+            Log.d(SESSION_LOG_TAG, "resume target=$targetId origin=${origin.protocolValue}")
+        }
+        return send(MSG_RESUME_GAME_TARGET, launchBundle(targetId, origin).apply {
             putInt(KEY_RESUME_SAVE_SLOT, saveSlot)
         })
     }
 
-    fun openLoadGame(targetId: String): Boolean {
+    fun openLoadGame(targetId: String, origin: ScummVMLaunchOrigin): Boolean {
         if (targetId.isBlank()) return false
-        return send(MSG_LOAD_GAME_TARGET, Bundle().apply { putString(KEY_TARGET_ID, targetId) })
+        if (sessionLoggingEnabled) {
+            Log.d(SESSION_LOG_TAG, "load target=$targetId origin=${origin.protocolValue}")
+        }
+        return send(MSG_LOAD_GAME_TARGET, launchBundle(targetId, origin))
+    }
+
+    private fun launchBundle(targetId: String, origin: ScummVMLaunchOrigin) = Bundle().apply {
+        putString(KEY_TARGET_ID, targetId)
+        putString(KEY_LAUNCH_ORIGIN, origin.protocolValue)
     }
 
     fun openAdvancedScummVM(): Boolean = send(MSG_OPEN_SCUMMVM_LIBRARY)
@@ -236,7 +257,8 @@ internal class ScummVMLibraryClient(
 
     private companion object {
         const val TAG = "AdventurePadLibrary"
-        const val SCUMMVM_PACKAGE = "org.scummvm.scummvm.debug"
+        const val SESSION_LOG_TAG = "AdventurePadSession"
+        val SCUMMVM_PACKAGE = BuildConfig.SCUMMVM_PACKAGE
         const val SCUMMVM_SERVICE = "org.scummvm.scummvm.RelativeInputService"
         const val MSG_QUERY_GAME_LIBRARY = 200
         const val MSG_LAUNCH_GAME_TARGET = 201
@@ -250,6 +272,7 @@ internal class ScummVMLibraryClient(
         const val MSG_REMOVE_GAME_RESULT = 209
         const val KEY_TARGETS = "targets"
         const val KEY_TARGET_ID = "targetId"
+        const val KEY_LAUNCH_ORIGIN = "launchOrigin"
         const val KEY_TITLE = "title"
         const val KEY_ENGINE_ID = "engineId"
         const val KEY_GAME_ID = "gameId"

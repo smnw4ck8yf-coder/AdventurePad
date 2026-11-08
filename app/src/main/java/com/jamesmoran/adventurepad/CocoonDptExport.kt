@@ -62,6 +62,18 @@ internal interface CocoonOwnershipStore {
     fun save(manifest: CocoonOwnershipManifest)
 }
 
+internal data class PendingGameExport(
+    val fileName: String,
+    val targetId: String,
+    val contentSha256: String,
+)
+
+internal interface PendingGameExportStore {
+    fun load(): PendingGameExport?
+    fun save(pending: PendingGameExport)
+    fun clear()
+}
+
 internal class CocoonDptExporter(
     private val ownershipStore: CocoonOwnershipStore,
 ) {
@@ -106,6 +118,85 @@ internal class CocoonDptExporter(
         )
         ownershipStore.save(updated)
         return CocoonExportApplyResult(written, failures, updated)
+    }
+
+    /**
+     * Completes ownership recording after a process interruption. The journal is authority only
+     * for the exact filename and content hash AdventurePad recorded before creating the file.
+     */
+    fun recoverPendingExport(
+        directory: CocoonExportDirectory,
+        journal: PendingGameExportStore,
+    ): Boolean {
+        val pending = journal.load() ?: return false
+        val matches = directory.readDptFiles().filter {
+            it.fileName.equals(pending.fileName, ignoreCase = true)
+        }
+        val existing = matches.singleOrNull()
+        if (existing == null || cocoonContentSha256(existing.content) != pending.contentSha256) {
+            journal.clear()
+            return false
+        }
+
+        saveOwnedExport(existing.fileName, pending.targetId, pending.contentSha256)
+        journal.clear()
+        return true
+    }
+
+    /** Add-only automatic path: never updates, deletes, or claims an unjournaled existing file. */
+    fun applyAdditions(
+        plan: CocoonExportPlan,
+        directory: CocoonExportDirectory,
+        journal: PendingGameExportStore,
+        shouldContinue: () -> Boolean = { true },
+    ): CocoonExportApplyResult {
+        val written = mutableListOf<CocoonExportEntry>()
+        val failures = mutableListOf<Pair<CocoonExportEntry, String>>()
+        for (entry in plan.entries.filter { it.action == CocoonExportAction.ADD }) {
+            if (!shouldContinue()) break
+            val attempt = runCatching {
+                val pending = PendingGameExport(
+                    fileName = entry.fileName,
+                    targetId = entry.targetId,
+                    contentSha256 = cocoonContentSha256(entry.content),
+                )
+                journal.save(pending)
+                directory.writeDpt(entry.fileName, entry.content, expectedExistingSha256 = null)
+                val matches = directory.readDptFiles().filter {
+                    it.fileName.equals(entry.fileName, ignoreCase = true)
+                }
+                val created = matches.singleOrNull()
+                    ?: error("AdventurePad could not verify '${entry.fileName}' after writing it.")
+                check(cocoonContentSha256(created.content) == pending.contentSha256) {
+                    "'${entry.fileName}' did not match the content AdventurePad wrote."
+                }
+                saveOwnedExport(created.fileName, entry.targetId, pending.contentSha256)
+                journal.clear()
+            }
+            attempt.onSuccess {
+                written += entry
+            }.onFailure { error ->
+                failures += entry to (error.message ?: "The document provider rejected the write.")
+            }
+            // Keep the failed operation journal intact for exact-hash recovery; do not replace it
+            // with a later entry from the same batch.
+            if (attempt.isFailure) break
+        }
+        return CocoonExportApplyResult(written, failures, ownershipStore.load())
+    }
+
+    private fun saveOwnedExport(fileName: String, targetId: String, contentSha256: String) {
+        val entries = ownershipStore.load().entries.associateByTo(linkedMapOf()) {
+            it.fileName.lowercase(Locale.ROOT)
+        }
+        entries[fileName.lowercase(Locale.ROOT)] = CocoonOwnedDpt(fileName, targetId, contentSha256)
+        ownershipStore.save(
+            CocoonOwnershipManifest(
+                entries.values.sortedWith(
+                    compareBy<CocoonOwnedDpt, String>(String.CASE_INSENSITIVE_ORDER) { it.fileName },
+                ),
+            ),
+        )
     }
 }
 

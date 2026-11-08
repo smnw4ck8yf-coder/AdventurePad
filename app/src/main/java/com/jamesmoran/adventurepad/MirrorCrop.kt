@@ -72,6 +72,9 @@ internal data class MirrorSourceGeometry(
     val generation: Long,
     val gameId: String = "",
     val orientation: SourceOrientation = SourceOrientation.NORMAL,
+    val guiOverlayVisible: Boolean = false,
+    val bridgeStateGeneration: Long = 0L,
+    val queryGeneration: Long = 0L,
 ) {
     val aspectRatio: Float get() = if (height > 0) width.toFloat() / height else 0f
     val isSupported: Boolean get() = width > 0 && height > 0 && generation > 0L && rendererCapability > 0
