@@ -865,7 +865,22 @@ private fun LauncherHeader(
                 label = "launcher-header-action",
             ) { compact ->
                 if (compact) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        OutlinedButton(
+                            onClick = onSettings,
+                            modifier = Modifier.testTag("launcher-scummvm-settings"),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                containerColor = palette.launcherContent,
+                                contentColor = palette.launcherInk,
+                            ),
+                            border = BorderStroke(2.dp, palette.launcherAccentDark),
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text("ScummVM", fontWeight = FontWeight.Bold)
+                        }
                         LauncherLibraryControls(
                             sortMode = sortMode,
                             editingOrder = editingOrder,
@@ -893,6 +908,7 @@ private fun LauncherHeader(
                         }
                         OutlinedButton(
                             onClick = onSettings,
+                            modifier = Modifier.testTag("launcher-scummvm-settings"),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 containerColor = palette.launcherContent,
                                 contentColor = palette.launcherInk,
