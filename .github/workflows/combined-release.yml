@@ -37,7 +37,7 @@ jobs:
 
       - name: Install pinned Android toolchain
         shell: bash
-        run: sdkmanager 'platforms;android-37' 'build-tools;37.0.0' 'ndk;23.2.8568313'
+        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;23.2.8568313'
 
       - name: Build pinned native dependencies
         shell: bash
