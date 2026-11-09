@@ -1,6 +1,6 @@
 # Release Signing
 
-AdventurePad and ScummVM-AdventurePad communicate through signature-protected Android permissions. Every matching APK pair must therefore be signed by the **same durable, controlled release identity**.
+The combined AdventurePad APK must always use the original durable AdventurePad signing identity. Android requires the same application ID and signing certificate for an in-place update, so a build signed with a temporary or replacement key cannot update existing installations.
 
 No signing key, password, machine-specific keystore path, or release-signing secret is stored in either source repository. The release identity must be created, stored, and backed up separately from the repositories and used consistently for all future AdventurePad preview and stable releases.
 
@@ -14,33 +14,30 @@ Beginning with `v0.2.0-preview`, the controlled AdventurePad release certificate
 
 The certificate fingerprint is public information. The private signing key and its credentials must never be committed or distributed.
 
-AdventurePad reads release-signing configuration from the developer's ignored `local.properties`. Local signing configuration must provide the keystore location, key alias, keystore password, and key password expected by the Gradle release signing configuration.
+AdventurePad reads local release-signing configuration from ignored `local.properties` or environment variables. Local configuration must provide the keystore location, key alias, keystore password, and key password expected by the Gradle release signing configuration.
 
-## ScummVM-AdventurePad pairing
+GitHub Actions uses four repository secrets:
 
-The current AdventurePad runtime explicitly targets the custom ScummVM package:
+- `ADVENTUREPAD_RELEASE_KEYSTORE_BASE64`
+- `ADVENTUREPAD_RELEASE_STORE_PASSWORD`
+- `ADVENTUREPAD_RELEASE_KEY_ALIAS`
+- `ADVENTUREPAD_RELEASE_KEY_PASSWORD`
 
-`org.scummvm.scummvm.debug`
+Encode the existing keystore as a single-line Base64 value before adding the first secret. The keystore and passwords remain outside Git. The combined-release workflow fails if any secret is missing, writes the decoded keystore only to the runner's temporary directory with restrictive permissions, deletes it when the signing step ends, and verifies the finished APK against the public fingerprint above.
 
-For `v0.2.0-preview`, the matching ScummVM-AdventurePad APK therefore retains that package ID and is signed with the same controlled AdventurePad release certificate.
+Never generate a fallback key in a release workflow. A fallback can produce a valid APK that cannot update the installed AdventurePad app.
 
-This is intentional: the standard ScummVM release package `org.scummvm.scummvm` is not a drop-in replacement for the current AdventurePad bridge.
+## Combined release verification
 
-Before distribution, verify both APKs independently with Android `apksigner` and confirm that their SHA-256 signer digests are identical.
+The combined distribution has one installed package, `com.jamesmoran.adventurepad`, with ScummVM packaged inside it. Before distribution, run `tools/verify-release-apk.sh` against the exact APK to be uploaded. It rejects the wrong package or version, an unexpected signer, a debuggable build, non-AdventurePad application labels, or a missing arm64 ScummVM engine.
 
-## Migration from the first preview
-
-The published `v0.1.0-preview` APKs used the former Android debug signer. Moving to the controlled release identity can therefore require uninstalling both old apps before installing the newly signed pair.
-
-Before migration, users should back up relevant AdventurePad data, imported skins, ScummVM configuration, and save data. Uninstalling can remove app-private data and persisted folder permissions.
-
-Never publish a keystore or its credentials, and never use the Android debug certificate as the release identity for future AdventurePad releases.
+Never publish a keystore or its credentials, and never use an Android debug or temporary certificate for an AdventurePad release.
 
 ## v0.2.0-preview source pairing
 
 The intended source pair is:
 
 - AdventurePad `main` at the revision recorded by the `v0.2.0-preview` release/tag.
-- ScummVM-AdventurePad branch `adventurepad` at the revision recorded by the `v0.2.0-preview` release/tag.
+- ScummVM-AdventurePad at the revision recorded in `scummvm-engine.properties`.
 
-The recorded ScummVM revision identifies the corresponding custom source and must include the package-preserving, non-debuggable `adventurepadRelease` variant. Local Android packaging/signing configuration may contain ignored machine-specific release settings and must not contain signing secrets in Git.
+Local Android packaging/signing configuration may contain ignored machine-specific release settings and must not contain signing secrets in Git.

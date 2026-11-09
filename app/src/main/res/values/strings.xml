@@ -1,3 +1,4 @@
 <resources>
-    <string name="app_name">AdventurePad</string>
+    <!-- Keep this name distinct from the embedded engine's localized app_name resource. -->
+    <string name="adventurepad_app_name">AdventurePad</string>
 </resources>

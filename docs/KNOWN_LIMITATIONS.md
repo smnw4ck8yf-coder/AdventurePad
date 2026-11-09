@@ -6,9 +6,9 @@ AdventurePad is active, pre-stable development software. These notes describe th
 
 AYN Thor is the only intended and tested device. Other dual-display Android devices are unverified and unsupported, even if they expose a compatible presentation display. Single-screen Android use is not supported.
 
-## Custom ScummVM dependency
+## Embedded ScummVM dependency
 
-AdventurePad requires its matching modified ScummVM APK. Stock ScummVM does not provide the required bridge. Both APK versions and their signing identity must match for the signature-protected permissions to work.
+The combined release bundles AdventurePad's matching modified ScummVM engine. Stock ScummVM does not provide the required integration and is not substituted at runtime. Legacy standalone development builds still use the matching two-app bridge.
 
 ## Preview and development status
 
@@ -39,6 +39,6 @@ The Walkthrough reader stores a line-spacing preference internally, but the inte
 
 ## Releases and builds
 
-A reproducible clean build process for the custom ScummVM native dependencies is still being formalized. The shared release-signing strategy for the two APKs is also not final. The current public preview is historical and older than the development source.
+The combined release build pins the engine revision and native dependency versions. It is intentionally manual and requires the original AdventurePad signing identity through GitHub Actions secrets. Clean installation and fresh dual-screen onboarding for `0.2.0-preview` have not been tested; see the release notes and installation guide for the exact validation scope.
 
 See also: [Features](FEATURES.md) · [Installation](INSTALLATION.md) · [Building](BUILDING.md)

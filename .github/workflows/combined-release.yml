@@ -37,7 +37,9 @@ jobs:
 
       - name: Install pinned Android toolchain
         shell: bash
-        run: sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;23.2.8568313'
+        run: |
+          sdkmanager 'platforms;android-37.0' 'build-tools;37.0.0' 'ndk;23.2.8568313'
+          echo "$ANDROID_SDK_ROOT/build-tools/37.0.0" >> "$GITHUB_PATH"
 
       - name: Build pinned native dependencies
         shell: bash
@@ -58,7 +60,10 @@ jobs:
             --with-png-prefix="$RUNNER_TEMP/scummvm-deps/libpng-prefix-arm64"
           make -j"$(nproc)" ScummVM-debug.apk
 
-      - name: Prepare release signing
+      - name: Test standalone AdventurePad
+        run: ./gradlew testDebugUnitTest assembleDebug
+
+      - name: Build signed combined release
         shell: bash
         env:
           ADVENTUREPAD_RELEASE_KEYSTORE_BASE64: ${{ secrets.ADVENTUREPAD_RELEASE_KEYSTORE_BASE64 }}
@@ -66,6 +71,9 @@ jobs:
           ADVENTUREPAD_RELEASE_KEY_ALIAS: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_ALIAS }}
           ADVENTUREPAD_RELEASE_KEY_PASSWORD: ${{ secrets.ADVENTUREPAD_RELEASE_KEY_PASSWORD }}
         run: |
+          set -euo pipefail
+          umask 077
+
           signing_values=(
             "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64"
             "$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
@@ -79,47 +87,24 @@ jobs:
             fi
           done
 
-          if [[ "$configured" -eq "${#signing_values[@]}" ]]; then
-            echo "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/adventurepad-release.jks"
-          elif [[ "$configured" -eq 0 ]]; then
-            ADVENTUREPAD_RELEASE_STORE_PASSWORD=adventurepad-test
-            ADVENTUREPAD_RELEASE_KEY_ALIAS=adventurepad-test
-            ADVENTUREPAD_RELEASE_KEY_PASSWORD=adventurepad-test
-            keytool -genkeypair \
-              -keystore "$RUNNER_TEMP/adventurepad-release.jks" \
-              -storepass "$ADVENTUREPAD_RELEASE_STORE_PASSWORD" \
-              -alias "$ADVENTUREPAD_RELEASE_KEY_ALIAS" \
-              -keypass "$ADVENTUREPAD_RELEASE_KEY_PASSWORD" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 365 \
-              -dname 'CN=AdventurePad Test Build, OU=Testing, O=AdventurePad, L=London, C=GB'
-          else
-            echo "Release signing secrets are only partially configured" >&2
+          if [[ "$configured" -ne "${#signing_values[@]}" ]]; then
+            echo "All four AdventurePad release-signing secrets are required; refusing to create a differently signed artifact" >&2
             exit 1
           fi
 
-          {
-            echo "ADVENTUREPAD_RELEASE_STORE_FILE=$RUNNER_TEMP/adventurepad-release.jks"
-            echo "ADVENTUREPAD_RELEASE_STORE_PASSWORD=$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
-            echo "ADVENTUREPAD_RELEASE_KEY_ALIAS=$ADVENTUREPAD_RELEASE_KEY_ALIAS"
-            echo "ADVENTUREPAD_RELEASE_KEY_PASSWORD=$ADVENTUREPAD_RELEASE_KEY_PASSWORD"
-          } >> "$GITHUB_ENV"
+          keystore="$RUNNER_TEMP/adventurepad-release.jks"
+          trap 'rm -f "$keystore"' EXIT
+          printf '%s' "$ADVENTUREPAD_RELEASE_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          test -s "$keystore"
 
-      - name: Test standalone AdventurePad
-        run: ./gradlew testDebugUnitTest assembleDebug
-
-      - name: Build signed combined release
-        run: |
-          test -s "$ADVENTUREPAD_RELEASE_STORE_FILE"
-          test -n "$ADVENTUREPAD_RELEASE_STORE_PASSWORD"
-          test -n "$ADVENTUREPAD_RELEASE_KEY_ALIAS"
-          test -n "$ADVENTUREPAD_RELEASE_KEY_PASSWORD"
+          export ADVENTUREPAD_RELEASE_STORE_FILE="$keystore"
           ./gradlew \
             -Padventurepad.bundledEngine=true \
             -Pscummvm.dir="$GITHUB_WORKSPACE/ScummVM-AdventurePad" \
             :scummvmEngine:verifyScummVMClean \
             :app:assembleRelease
+
+          tools/verify-release-apk.sh app/build/outputs/apk/release/app-release.apk
 
       - name: Assemble source and licence bundle
         shell: bash
@@ -139,6 +124,10 @@ jobs:
             cat "$RUNNER_TEMP/scummvm-deps/DEPENDENCIES.lock"
           } > release/BUILD-PROVENANCE.txt
           sha256sum release/* > release/SHA256SUMS
+
+      - name: Verify packaged release candidate
+        shell: bash
+        run: tools/verify-release-apk.sh release/AdventurePad-combined-arm64.apk
 
       - name: Upload release candidate
         uses: actions/upload-artifact@v4
