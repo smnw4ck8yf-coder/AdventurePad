@@ -123,7 +123,7 @@ jobs:
             echo "scummvm=${{ steps.pairing.outputs.revision }}"
             cat "$RUNNER_TEMP/scummvm-deps/DEPENDENCIES.lock"
           } > release/BUILD-PROVENANCE.txt
-          sha256sum release/* > release/SHA256SUMS
+          (cd release && sha256sum * > SHA256SUMS)
 
       - name: Verify packaged release candidate
         shell: bash
