@@ -35,6 +35,7 @@
             android:name=".LauncherRoutingActivity"
             android:excludeFromRecents="true"
             android:exported="true"
+            android:label="@string/adventurepad_app_name"
             android:noHistory="true"
             android:taskAffinity=""
             android:theme="@android:style/Theme.Translucent.NoTitleBar">

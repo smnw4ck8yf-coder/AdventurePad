@@ -28,9 +28,18 @@ actual_signer=$(printf '%s\n' "$signing_report" | sed -n \
 
 badging=$(aapt dump badging "$apk")
 package_line=$(printf '%s\n' "$badging" | sed -n '1p')
-[[ "$package_line" == *"name='$expected_package'"* ]]
-[[ "$package_line" == *"versionCode='$expected_version_code'"* ]]
-[[ "$package_line" == *"versionName='$expected_version_name'"* ]]
+[[ "$package_line" == *"name='$expected_package'"* ]] || {
+    echo "Unexpected package metadata: $package_line" >&2
+    exit 1
+}
+[[ "$package_line" == *"versionCode='$expected_version_code'"* ]] || {
+    echo "Unexpected version code: $package_line" >&2
+    exit 1
+}
+[[ "$package_line" == *"versionName='$expected_version_name'"* ]] || {
+    echo "Unexpected version name: $package_line" >&2
+    exit 1
+}
 
 if [[ "$badging" == *$'\napplication-debuggable'* ]]; then
     echo "Release APK is debuggable" >&2
@@ -46,8 +55,15 @@ label_failures=$(printf '%s\n' "$badging" \
     exit 1
 }
 
-[[ "$badging" == *"launchable-activity-label:'AdventurePad'"* ]]
+launchable_line=$(printf '%s\n' "$badging" | sed -n '/^launchable-activity:/p')
+[[ "$launchable_line" == *"label='AdventurePad'"* ]] || {
+    echo "Unexpected launcher activity branding: ${launchable_line:-missing}" >&2
+    exit 1
+}
 apk_listing=$(unzip -Z1 "$apk")
-grep -Fx 'lib/arm64-v8a/libscummvm.so' <<< "$apk_listing" >/dev/null
+grep -Fx 'lib/arm64-v8a/libscummvm.so' <<< "$apk_listing" >/dev/null || {
+    echo "Embedded arm64 ScummVM engine is missing" >&2
+    exit 1
+}
 
 echo "Verified package, version, signer, release mode, AdventurePad branding, and embedded arm64 ScummVM engine."
