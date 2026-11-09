@@ -18,7 +18,9 @@ test -s "$apk"
 
 signing_report=$(apksigner verify --verbose --print-certs "$apk")
 printf '%s\n' "$signing_report"
-actual_signer=$(printf '%s\n' "$signing_report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p')
+actual_signer=$(printf '%s\n' "$signing_report" | sed -n \
+    -e 's/^Signer #[0-9][0-9]* certificate SHA-256 digest: //p' \
+    -e 's/^V[0-9][0-9]* Signer: certificate SHA-256 digest: //p')
 [[ "$actual_signer" == "$expected_signer" ]] || {
     echo "Unexpected signing certificate: ${actual_signer:-missing}" >&2
     exit 1
